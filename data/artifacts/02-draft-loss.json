@@ -2,20 +2,18 @@
   {
     "id": "multiple_choice",
     "name": "多选题",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["draft"],
-    "description": "每次抽取遗物的备选数 +1。",
+    "description": "每次抽取遗物时，备选数 +1。",
     "modifiers": [{ "target": "draftChoicesBonus", "mode": "add", "value": 1 }],
     "triggers": []
   },
   {
     "id": "create_from_nothing",
     "name": "无中生有",
-    "source": "斗地主",
     "rarity": "rare",
     "tags": ["draft", "consume"],
-    "description": "随机加入两张新词条，销毁此词条。",
+    "description": "随机获得 2 件遗物，然后销毁自身。",
     "triggers": [
       {
         "timing": "ARTIFACT_GAINED",
@@ -26,10 +24,9 @@
   {
     "id": "ten_pull_gift",
     "name": "上线立送10连抽",
-    "source": "手游梗",
     "rarity": "rare",
     "tags": ["draft", "consume"],
-    "description": "立刻从 10 张新词条中选取一张。",
+    "description": "立刻进行一次 10 选 1 遗物抽取。",
     "triggers": [
       {
         "timing": "ARTIFACT_GAINED",
@@ -40,10 +37,9 @@
   {
     "id": "change_everything",
     "name": "我们可以改变一切",
-    "source": "网文",
     "rarity": "rare",
     "tags": ["destroy", "exam_score"],
-    "description": "销毁一个其他遗物，下场考试增加 200 分。",
+    "description": "销毁最左侧其他遗物；下场考试初始分 +200。",
     "triggers": [
       {
         "timing": "ARTIFACT_GAINED",
@@ -57,10 +53,9 @@
   {
     "id": "silver_lion",
     "name": "白银狮子",
-    "source": "三国杀",
     "rarity": "uncommon",
     "tags": ["lost", "exam_score"],
-    "description": "失去这张遗物时，下场考试增加 100 分。",
+    "description": "失去这件遗物时，下场考试初始分 +100。",
     "triggers": [
       {
         "timing": "ARTIFACT_LOST",

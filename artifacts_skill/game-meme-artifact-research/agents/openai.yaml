@@ -1,4 +1,0 @@
-interface:
-  display_name: "Game Meme Artifact Research"
-  short_description: "Convert game memes into exam relics"
-  default_prompt: "Use $game-meme-artifact-research to research a game meme topic and draft a humorous GaokaoArtifact relic Markdown."

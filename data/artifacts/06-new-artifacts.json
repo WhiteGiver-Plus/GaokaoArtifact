@@ -2,20 +2,18 @@
   {
     "id": "prediction",
     "name": "押题",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["accuracy"],
-    "description": "正确率 x1.5。",
+    "description": "最终正确率 x1.5。",
     "modifiers": [{ "target": "finalAccuracy", "mode": "multiply", "value": 1.5 }],
     "triggers": []
   },
   {
     "id": "holy_water_collector",
     "name": "圣水采集器",
-    "source": "皇室战争",
     "rarity": "rare",
     "tags": ["accuracy", "multiplier"],
-    "description": "超出 100% 的正确率转换为得分乘数。",
+    "description": "超出 100% 的当前正确率转换为本题得分倍率加成。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -27,10 +25,9 @@
   {
     "id": "transcendent",
     "name": "超凡入圣",
-    "source": "网文",
     "rarity": "rare",
     "tags": ["accuracy", "multiplier"],
-    "description": "若你的正确率超过 200%，本题得分倍率 x4。",
+    "description": "若当前正确率超过 200%，本题得分倍率 x4。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -42,10 +39,9 @@
   {
     "id": "happy_flower",
     "name": "快乐小花",
-    "source": "植物大战僵尸",
     "rarity": "uncommon",
     "tags": ["accuracy", "position", "multiplier"],
-    "description": "每 3 道题，本题正确率 x1.5，得分倍率 x2。",
+    "description": "每场考试每第 3 题，本题正确率 x1.5，本题得分倍率 x2。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -65,10 +61,9 @@
   {
     "id": "pen_nib",
     "name": "钢笔尖",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["accuracy", "position", "multiplier"],
-    "description": "每第 10 题，本题正确率 x2，得分倍率 x5。",
+    "description": "每场考试第 10 题，本题正确率 x2，本题得分倍率 x5。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -88,10 +83,9 @@
   {
     "id": "energetic",
     "name": "精力充沛",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["stamina", "multiplier"],
-    "description": "若体力高于 100%，则本题得分倍率 x1.5。",
+    "description": "体力高于 100% 时，本题得分倍率 x1.5。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -103,10 +97,9 @@
   {
     "id": "red_skull",
     "name": "红骷髅",
-    "source": "漫威梗",
     "rarity": "uncommon",
     "tags": ["stamina", "accuracy"],
-    "description": "当你体力低于 50% 时，正确率 x1.5。",
+    "description": "体力低于 50% 时，最终正确率 x1.5。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -120,10 +113,9 @@
   {
     "id": "math_lover",
     "name": "数学爱好者",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["score_pattern"],
-    "description": "考试结束后，可以交换分数的任意两位数字，在 C 语言大佬之前触发。",
+    "description": "考试结束时，交换考试原始分的任意两位数字。",
     "triggers": [
       {
         "timing": "EXAM_END",
@@ -136,10 +128,9 @@
   {
     "id": "c_language_master",
     "name": "C语言大佬",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["score_pattern"],
-    "description": "考试结束后更改分数个位数为 0-9 中任何数字，在分数加成卡之前触发。",
+    "description": "考试结束时，将考试原始分个位改为 0-9 中任意数字。",
     "triggers": [
       {
         "timing": "EXAM_END",
@@ -152,10 +143,9 @@
   {
     "id": "palindrome_score",
     "name": "回文数",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["score_pattern", "exam_multiplier"],
-    "description": "若考试结算前分数为回文数，本场考试倍率 +10。",
+    "description": "每科考试结束时，若结算前考试原始分为回文数，则本场考试倍率 +10。",
     "triggers": [
       {
         "timing": "EXAM_END",
@@ -168,10 +158,9 @@
   {
     "id": "all_for_nothing",
     "name": "前功尽弃",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["alternate", "exam_multiplier"],
-    "description": "若前一题正确而本题错误，本场考试结算倍率 x1.2。",
+    "description": "若前一题答对且本题答错，则本场考试倍率 x1.2。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -189,10 +178,9 @@
   {
     "id": "learn_from_mistakes",
     "name": "知错能改",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["alternate", "exam_multiplier"],
-    "description": "若前一题错误而本题正确，本场考试结算倍率 x1.2。",
+    "description": "若前一题答错且本题答对，则本场考试倍率 x1.2。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -210,10 +198,9 @@
   {
     "id": "final_question_warrior",
     "name": "压轴题战神",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["position", "multiplier"],
-    "description": "每场考试最后一题得分倍率 x10。",
+    "description": "每场考试最后一题，本题得分倍率 x10。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -225,36 +212,33 @@
   {
     "id": "no_external_things",
     "name": "无须外物",
-    "source": "高考梗",
     "rarity": "special",
-    "tags": ["artifact", "destroy", "run_multiplier"],
-    "description": "获得时弃掉其余所有遗物，每因此弃掉一张，当前分数 x1.4。",
+    "tags": ["artifact", "destroy", "current_total"],
+    "description": "获得时，弃掉其余所有遗物；每因此弃掉 1 件，当前总分 x1.4。",
     "triggers": [
       {
         "timing": "ARTIFACT_GAINED",
-        "effects": [{ "op": "destroyAllOtherAndMultiplyRun", "factorPerDestroyed": 1.4 }]
+        "effects": [{ "op": "destroyAllOtherAndMultiplyCurrentTotal", "factorPerDestroyed": 1.4 }]
       }
     ]
   },
   {
     "id": "travel_light",
     "name": "轻装上阵",
-    "source": "高考梗",
     "rarity": "rare",
-    "tags": ["artifact", "capacity", "run_multiplier"],
-    "description": "遗物上限永久 -1，当前分数 x1.5。",
+    "tags": ["artifact", "capacity", "current_total"],
+    "description": "遗物上限永久 -1；获得时，当前总分 x1.5。",
     "modifiers": [{ "target": "artifactLimit", "mode": "add", "value": -1 }],
     "triggers": [
       {
         "timing": "ARTIFACT_GAINED",
-        "effects": [{ "op": "multiplyRunMultiplier", "value": 1.5 }]
+        "effects": [{ "op": "adjustCurrentTotalScore", "mode": "multiply", "value": 1.5 }]
       }
     ]
   },
   {
     "id": "tiny_joker",
     "name": "小丑牌",
-    "source": "小丑牌",
     "rarity": "common",
     "tags": ["blank"],
     "description": "仅仅是这张牌很小丑。无任何效果。",
@@ -263,7 +247,6 @@
   {
     "id": "hundred_day_oath",
     "name": "百日誓师",
-    "source": "高考梗",
     "rarity": "common",
     "tags": ["blank"],
     "description": "无任何效果。",
@@ -272,10 +255,9 @@
   {
     "id": "nonsense_master",
     "name": "废话文学大师",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["blank", "exam_score"],
-    "description": "每拥有 1/2/3/4 张无效遗物，每场考试得分 +20/+100/+1000/+5000。",
+    "description": "每科考试结束时，按无效遗物数量使本场考试最终得分增加：1/2/3/4+ 件对应 20/100/1000/5000。",
     "triggers": [
       {
         "timing": "EXAM_END",
@@ -302,7 +284,6 @@
   {
     "id": "lucky_star",
     "name": "幸运星",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["lucky_block"],
     "description": "幸运方块触发概率 x8。",
@@ -312,7 +293,6 @@
   {
     "id": "lucky_coin",
     "name": "幸运币",
-    "source": "高考梗",
     "rarity": "rare",
     "tags": ["lucky_block"],
     "description": "幸运方块触发概率 x8。",

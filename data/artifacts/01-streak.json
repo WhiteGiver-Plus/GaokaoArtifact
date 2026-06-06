@@ -2,10 +2,9 @@
   {
     "id": "big_pity",
     "name": "大保底",
-    "source": "抽卡",
     "rarity": "rare",
     "tags": ["accuracy", "position"],
-    "description": "你的最后一题正确率 +1000%。",
+    "description": "每场考试最后一题，本题正确率 +1000%。",
     "triggers": [
       {
         "timing": "QUESTION_BEFORE_ROLL",
@@ -17,10 +16,9 @@
   {
     "id": "small_pity",
     "name": "小保底",
-    "source": "抽卡",
     "rarity": "uncommon",
     "tags": ["accuracy", "position"],
-    "description": "每第 5 题正确率 +200%。",
+    "description": "每场考试每第 5 题，本题正确率 +200%。",
     "triggers": [
       {
         "timing": "QUESTION_BEFORE_ROLL",
@@ -32,10 +30,9 @@
   {
     "id": "empty_city",
     "name": "空城",
-    "source": "三国杀",
     "rarity": "rare",
     "tags": ["wrong", "exam_score"],
-    "description": "若本场考试所有题目全部答错，则本场考试获得满分。",
+    "description": "若本场考试所有题目全部答错，则考试原始分至少补到满分。",
     "triggers": [
       {
         "timing": "EXAM_END",
@@ -47,10 +44,9 @@
   {
     "id": "self_sacrifice",
     "name": "自刎归天",
-    "source": "三国杀",
     "rarity": "special",
     "tags": ["wrong", "risk"],
-    "description": "本场考试全部题目正确率 -100%。",
+    "description": "本场考试每题的本题正确率 -100%。",
     "triggers": [
       {
         "timing": "QUESTION_BEFORE_ROLL",
@@ -61,10 +57,9 @@
   {
     "id": "proud_winner",
     "name": "胜兵必骄，骄兵必败",
-    "source": "三国杀",
     "rarity": "uncommon",
     "tags": ["streak", "risk"],
-    "description": "若上一道题答对，则下两道题正确率 -100%。",
+    "description": "若本题答对，则后续 2 题本题正确率 -100%。",
     "triggers": [
       {
         "timing": "QUESTION_AFTER_ROLL",
@@ -83,10 +78,9 @@
   {
     "id": "sad_loser",
     "name": "败兵必哀，哀兵必胜",
-    "source": "三国杀",
     "rarity": "uncommon",
     "tags": ["streak", "comeback"],
-    "description": "若上一道题答错，则下两道题正确率 +100%。",
+    "description": "若本题答错，则后续 2 题本题正确率 +100%。",
     "triggers": [
       {
         "timing": "QUESTION_AFTER_ROLL",
@@ -105,10 +99,9 @@
   {
     "id": "rageblade",
     "name": "羊刀",
-    "source": "LOL装备",
     "rarity": "rare",
     "tags": ["streak", "multiplier"],
-    "description": "每连续答对一道题，本题得分倍率乘 1.2。",
+    "description": "本题答对时，本题得分倍率按当前连对数连续 x1.2。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -126,10 +119,9 @@
   {
     "id": "doctor_scaling",
     "name": "医死的人越多，医术越高明",
-    "source": "网文",
     "rarity": "rare",
     "tags": ["wrong", "multiplier"],
-    "description": "每连续答错一道题，下一道题得分倍率乘 1.5。",
+    "description": "按上一段连续答错数，使本题得分倍率连续 x1.5。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -147,10 +139,9 @@
   {
     "id": "guardian_angel",
     "name": "复活甲",
-    "source": "LOL装备",
     "rarity": "rare",
     "tags": ["safety", "force_result"],
-    "description": "每场考试的第一道错题被强制改为正确。",
+    "description": "每场考试第一次答错时，强制将本题结果改为正确。",
     "triggers": [
       {
         "timing": "QUESTION_AFTER_ROLL",
@@ -163,10 +154,9 @@
   {
     "id": "right_then_wrong",
     "name": "对的对的，哦不对不对",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["risk", "force_result"],
-    "description": "每场考试的第一道正确题被强制改为错误。",
+    "description": "每场考试第一次答对时，强制将本题结果改为错误。",
     "triggers": [
       {
         "timing": "QUESTION_AFTER_ROLL",
@@ -179,25 +169,23 @@
   {
     "id": "final_ritual",
     "name": "至终的仪式",
-    "source": "第五人格",
     "rarity": "rare",
     "tags": ["streak", "total_score"],
-    "description": "每连续答对五题时，当前总分倍率乘 1.1。",
+    "description": "每连续答对五题时，当前总分 x1.1。",
     "triggers": [
       {
-        "timing": "QUESTION_SCORE",
+        "timing": "QUESTION_END",
         "condition": { "kind": "streak", "streak": "correct", "op": "multipleOf", "value": 5 },
-        "effects": [{ "op": "multiplyRunMultiplier", "value": 1.1 }]
+        "effects": [{ "op": "adjustCurrentTotalScore", "mode": "multiply", "value": 1.1 }]
       }
     ]
   },
   {
     "id": "identity_v",
     "name": "第五人格",
-    "source": "第五人格",
     "rarity": "rare",
     "tags": ["wrong", "exam_multiplier"],
-    "description": "每连续答错五题时，当前得分倍率乘 1.2。",
+    "description": "每连续答错 5 题时，本场考试倍率 x1.2。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",

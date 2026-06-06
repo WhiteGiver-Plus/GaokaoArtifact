@@ -2,4 +2,5 @@ node_modules/
 dist/
 coverage/
 .vitest/
-gh-pages/
+gh_pages_local_game/dist/
+gh_pages_local_game/vite-dev*.log

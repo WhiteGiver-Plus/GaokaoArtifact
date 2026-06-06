@@ -2,10 +2,9 @@
   {
     "id": "linked_seats",
     "name": "连坐制",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["position", "multiplier"],
-    "description": "若本题正确，则后一题得分倍率增加 1.5。",
+    "description": "若本题答对，则下一题本题得分倍率 +1.5。",
     "triggers": [
       {
         "timing": "QUESTION_AFTER_ROLL",
@@ -24,10 +23,9 @@
   {
     "id": "astrology",
     "name": "观星",
-    "source": "三国杀",
     "rarity": "common",
     "tags": ["position", "accuracy"],
-    "description": "每场考试前两题正确率 +100%。",
+    "description": "每场考试前 2 题，本题正确率 +100%。",
     "triggers": [
       {
         "timing": "QUESTION_BEFORE_ROLL",
@@ -39,10 +37,9 @@
   {
     "id": "sinking_malphite",
     "name": "沉底石头人",
-    "source": "LOL梗",
     "rarity": "uncommon",
     "tags": ["position", "multiplier"],
-    "description": "每次考试前 8 题得分倍率 -0.8，此后所有题得分倍率 +0.8。",
+    "description": "每场考试前 8 题，本题得分倍率 -0.8；第 9 题起，本题得分倍率 +0.8。",
     "triggers": [
       {
         "timing": "QUESTION_SCORE",
@@ -59,7 +56,6 @@
   {
     "id": "imitator",
     "name": "模仿者",
-    "source": "植物大战僵尸",
     "rarity": "rare",
     "tags": ["slot", "copy"],
     "description": "模仿右侧第一张遗物。",
@@ -76,7 +72,6 @@
   {
     "id": "repeater",
     "name": "双发射手",
-    "source": "植物大战僵尸",
     "rarity": "rare",
     "tags": ["slot", "repeat"],
     "description": "每次其他遗物触发时，20% 概率多触发一次。",
@@ -91,7 +86,6 @@
   {
     "id": "gatling_peashooter",
     "name": "机枪射手",
-    "source": "植物大战僵尸",
     "rarity": "rare",
     "tags": ["slot", "repeat"],
     "description": "每次其他遗物触发时，20% 概率多触发三次。",
@@ -106,7 +100,6 @@
   {
     "id": "tile_turnip",
     "name": "瓷砖萝卜",
-    "source": "植物大战僵尸",
     "rarity": "rare",
     "tags": ["slot", "repeat"],
     "description": "每次其他遗物触发时，20% 概率触发其右侧的第一个遗物。",
@@ -121,7 +114,6 @@
   {
     "id": "electric_gatling_pea",
     "name": "电能机枪豌豆",
-    "source": "植物大战僵尸",
     "rarity": "special",
     "tags": ["slot", "combo"],
     "description": "若你有机枪射手，机枪射手效果翻倍。",
@@ -130,7 +122,6 @@
   {
     "id": "shanghai_essay",
     "name": "上海卷高考作文",
-    "source": "高考梗",
     "rarity": "common",
     "tags": ["blank"],
     "description": "有人说，这个遗物没有任何效果，也有人认为不尽如此，你怎么看？无任何效果。",
@@ -139,7 +130,6 @@
   {
     "id": "reasonable_reason",
     "name": "说的道理",
-    "source": "高考梗",
     "rarity": "common",
     "tags": ["blank"],
     "description": "说的道理。无任何效果。",

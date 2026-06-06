@@ -2,10 +2,9 @@
   {
     "id": "glass_cannon",
     "name": "玻璃大炮",
-    "source": "游戏通用",
     "rarity": "rare",
     "tags": ["risk", "multiplier", "stamina"],
-    "description": "体力下降速度 +10%，本题得分倍率 +1。",
+    "description": "体力下降 +10；本题得分倍率 +1。",
     "modifiers": [
       { "target": "staminaDecay", "mode": "add", "value": 10 },
       { "target": "questionMultiplier", "mode": "add", "value": 1 }
@@ -15,10 +14,9 @@
   {
     "id": "regeneration_potion",
     "name": "再生药水",
-    "source": "泰拉瑞亚",
     "rarity": "common",
     "tags": ["stamina"],
-    "description": "体力每 5 题回复 20%。",
+    "description": "每场考试每第 5 题结束时，体力 +20。",
     "triggers": [
       {
         "timing": "QUESTION_END",
@@ -30,10 +28,9 @@
   {
     "id": "stamina_potion",
     "name": "体力药水",
-    "source": "泰拉瑞亚",
     "rarity": "common",
     "tags": ["stamina"],
-    "description": "当前体力增加 50%。",
+    "description": "获得时，体力 +50。",
     "triggers": [
       {
         "timing": "ARTIFACT_GAINED",
@@ -44,10 +41,9 @@
   {
     "id": "lucky_block",
     "name": "幸运方块",
-    "source": "游戏通用",
     "rarity": "rare",
     "tags": ["random", "exam_score"],
-    "description": "每题结算时有 0.2% 概率触发，获得 1000 分；每次触发后，下一次效果 x2。",
+    "description": "每题结算后有 0.2% 概率触发，本场考试最终得分增加 1000；每次触发后，下次幸运方块增加值 x2。",
     "triggers": [
       {
         "timing": "QUESTION_END",
@@ -59,7 +55,6 @@
   {
     "id": "strong_luck",
     "name": "强运",
-    "source": "高考梗",
     "rarity": "uncommon",
     "tags": ["accuracy"],
     "description": "基础正确率 x125%。",
@@ -69,7 +64,6 @@
   {
     "id": "death_blade",
     "name": "名刀·司命",
-    "source": "王者荣耀",
     "rarity": "rare",
     "tags": ["stamina", "safety"],
     "description": "你的体力下限被锁定为不可低于 10%。",
@@ -79,10 +73,9 @@
   {
     "id": "final_reincarnation",
     "name": "轮回之终末",
-    "source": "网文",
     "rarity": "special",
     "tags": ["accuracy", "stamina", "risk"],
-    "description": "正确率 +1000%，体力 +1000%，每场考试结束时 -1000 分。",
+    "description": "最终正确率 +1000%，获得时体力 +1000；每场考试结束时，考试原始分 -1000。",
     "modifiers": [{ "target": "finalAccuracy", "mode": "add", "value": 1000 }],
     "triggers": [
       {
@@ -98,7 +91,6 @@
   {
     "id": "eureka",
     "name": "尤里卡",
-    "source": "文明",
     "rarity": "common",
     "tags": ["accuracy"],
     "description": "基础正确率 x120%。",
@@ -108,20 +100,18 @@
   {
     "id": "doubao",
     "name": "豆包",
-    "source": "AI梗",
     "rarity": "uncommon",
     "tags": ["accuracy", "force_result"],
-    "description": "你可以在考试时询问豆包，基础正确率 x20%。",
+    "description": "基础正确率 x20%。",
     "modifiers": [{ "target": "baseAccuracy", "mode": "multiply", "value": 0.2 }],
     "triggers": []
   },
   {
     "id": "deep_thinking",
     "name": "深度思考中",
-    "source": "AI梗",
     "rarity": "uncommon",
     "tags": ["accuracy", "stamina"],
-    "description": "基础正确率 x140%，体力下降速率 +5%。",
+    "description": "基础正确率 x140%，体力下降 +5。",
     "modifiers": [
       { "target": "baseAccuracy", "mode": "multiply", "value": 1.4 },
       { "target": "staminaDecay", "mode": "add", "value": 5 }
