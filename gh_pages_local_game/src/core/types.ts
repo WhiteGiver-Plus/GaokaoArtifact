@@ -211,10 +211,40 @@ export interface RunResult {
   log: string[];
 }
 
+export interface LiveExamStatus {
+  accuracy: number;
+  questionMultiplier: number;
+  examMultiplier: number;
+  baseStamina: number;
+  stamina: number;
+}
+
+export interface LiveScoreStatus {
+  currentTotal: number;
+  currentExamScore: number;
+  examPostBonus: number;
+  currentTotalAdjustment: number;
+}
+
+export interface TriggerEvent {
+  artifactId: string;
+  artifactName: string;
+  timing: Timing;
+  triggerIndex: number;
+  slotIndex: number;
+  effectText: string;
+  replay: boolean;
+  before: LiveExamStatus;
+  after: LiveExamStatus;
+  scoreBefore: LiveScoreStatus;
+  scoreAfter: LiveScoreStatus;
+}
+
 export interface GameOptions {
   seed?: string;
   subjects?: SubjectId[];
   autoPolicy?: "first" | "random" | "rare";
+  initialArtifacts?: string[];
 }
 
 export interface DraftOffer {
@@ -229,10 +259,27 @@ export interface ChoiceHooks {
   chooseDigitSwap?:
     | ((score: number, subject: SubjectId) => Promise<[number, number] | undefined> | [number, number] | undefined);
   onLog?: (line: string) => void;
+  onTrigger?: (event: TriggerEvent) => Promise<void> | void;
   onArtifactsChanged?: (owned: ArtifactConfig[]) => void;
-  onExamStart?: (exam: { index: number; subject: SubjectId; startingScore: number }) => void;
-  beforeQuestion?: (exam: { index: number; subject: SubjectId; questionIndex: number }) => Promise<void> | void;
-  onQuestion?: (question: QuestionLog, exam: { index: number; subject: SubjectId; rawScore: number }) => void;
+  onExamStart?: (exam: { index: number; subject: SubjectId; startingScore: number; status: LiveExamStatus }) => void;
+  beforeQuestion?: (exam: {
+    index: number;
+    subject: SubjectId;
+    questionIndex: number;
+    status: LiveExamStatus;
+  }) => Promise<void> | void;
+  onQuestion?: (
+    question: QuestionLog,
+    exam: {
+      index: number;
+      subject: SubjectId;
+      rawScore: number;
+      examPostBonus: number;
+      currentTotalAdjustment: number;
+      currentTotalScore: number;
+      status: LiveExamStatus;
+    }
+  ) => void;
   onExamEnd?: (exam: ExamLog) => void;
   onRunEnd?: (result: RunResult) => void;
 }
@@ -247,6 +294,7 @@ export interface QuestionModifier {
 
 export interface RunStats {
   baseAccuracy: number;
+  baseStamina: number;
   stamina: number;
   staminaDecay: number;
   staminaFloor: number;

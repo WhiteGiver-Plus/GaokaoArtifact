@@ -9,7 +9,7 @@ export const LOCAL_ARTIFACTS = [
       "accuracy",
       "position"
     ],
-    "description": "每场考试最后一题，本题正确率 +1000%。",
+    "description": "每场考试最后一题，正确率 +1000%。",
     "modifiers": [],
     "triggers": [
       {
@@ -38,7 +38,7 @@ export const LOCAL_ARTIFACTS = [
       "accuracy",
       "position"
     ],
-    "description": "每场考试每第 5 题，本题正确率 +200%。",
+    "description": "每场考试每 5 道题，正确率 +200%。",
     "modifiers": [],
     "triggers": [
       {
@@ -93,7 +93,7 @@ export const LOCAL_ARTIFACTS = [
       "wrong",
       "risk"
     ],
-    "description": "本场考试每题的本题正确率 -100%。",
+    "description": "本场考试每题正确率 -100%。",
     "modifiers": [],
     "triggers": [
       {
@@ -117,7 +117,7 @@ export const LOCAL_ARTIFACTS = [
       "streak",
       "risk"
     ],
-    "description": "若本题答对，则后续 2 题本题正确率 -100%。",
+    "description": "若本题答对，则后续 2 题正确率 -100%。",
     "modifiers": [],
     "triggers": [
       {
@@ -147,7 +147,7 @@ export const LOCAL_ARTIFACTS = [
       "streak",
       "comeback"
     ],
-    "description": "若本题答错，则后续 2 题本题正确率 +100%。",
+    "description": "若本题答错，则后续 2 题正确率 +100%。",
     "modifiers": [],
     "triggers": [
       {
@@ -177,7 +177,7 @@ export const LOCAL_ARTIFACTS = [
       "streak",
       "multiplier"
     ],
-    "description": "本题答对时，本题得分倍率按当前连对数连续 x1.2。",
+    "description": "每题得分倍率按当前连对数连续 x1.1。",
     "modifiers": [],
     "triggers": [
       {
@@ -190,7 +190,7 @@ export const LOCAL_ARTIFACTS = [
           {
             "op": "multiplyQuestionMultiplierByStreak",
             "streak": "correct",
-            "base": 1.2
+            "base": 1.1
           }
         ]
       }
@@ -206,7 +206,7 @@ export const LOCAL_ARTIFACTS = [
       "wrong",
       "multiplier"
     ],
-    "description": "按上一段连续答错数，使本题得分倍率连续 x1.5。",
+    "description": "按上一段连续答错数，使本题得分倍率连续 x1.2。",
     "modifiers": [],
     "triggers": [
       {
@@ -215,7 +215,7 @@ export const LOCAL_ARTIFACTS = [
           {
             "op": "multiplyQuestionMultiplierByStreak",
             "streak": "wrong",
-            "base": 1.5,
+            "base": 1.2,
             "usePrevious": true
           }
         ]
@@ -484,7 +484,7 @@ export const LOCAL_ARTIFACTS = [
       "multiplier",
       "stamina"
     ],
-    "description": "体力下降 +10；本题得分倍率 +1。",
+    "description": "体力下降 +10；每题得分倍率 +1。",
     "modifiers": [
       {
         "target": "staminaDecay",
@@ -508,7 +508,7 @@ export const LOCAL_ARTIFACTS = [
     "tags": [
       "stamina"
     ],
-    "description": "每场考试每第 5 题结束时，体力 +20。",
+    "description": "每场考试每 5 道题结束时，体力 +20。",
     "modifiers": [],
     "triggers": [
       {
@@ -537,11 +537,11 @@ export const LOCAL_ARTIFACTS = [
     "tags": [
       "stamina"
     ],
-    "description": "获得时，体力 +50。",
+    "description": "每场考试开始时，体力 +50。",
     "modifiers": [],
     "triggers": [
       {
-        "timing": "ARTIFACT_GAINED",
+        "timing": "EXAM_START",
         "effects": [
           {
             "op": "addStat",
@@ -625,7 +625,7 @@ export const LOCAL_ARTIFACTS = [
       "stamina",
       "risk"
     ],
-    "description": "最终正确率 +1000%，获得时体力 +1000；每场考试结束时，考试原始分 -1000。",
+    "description": "最终正确率 +1000%，每场考试开始时体力 +1000；每场考试结束时，考试原始分 -1000。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -635,7 +635,7 @@ export const LOCAL_ARTIFACTS = [
     ],
     "triggers": [
       {
-        "timing": "ARTIFACT_GAINED",
+        "timing": "EXAM_START",
         "effects": [
           {
             "op": "addStat",
@@ -704,7 +704,7 @@ export const LOCAL_ARTIFACTS = [
       "accuracy",
       "stamina"
     ],
-    "description": "基础正确率 x140%，体力下降 +5。",
+    "description": "基础正确率 x140%，每题体力下降 +5。",
     "modifiers": [
       {
         "target": "baseAccuracy",
@@ -729,7 +729,7 @@ export const LOCAL_ARTIFACTS = [
       "position",
       "multiplier"
     ],
-    "description": "若本题答对，则下一题本题得分倍率 +1.5。",
+    "description": "若本题答对，则下一题得分倍率 +1.5。",
     "modifiers": [],
     "triggers": [
       {
@@ -759,7 +759,7 @@ export const LOCAL_ARTIFACTS = [
       "position",
       "accuracy"
     ],
-    "description": "每场考试前 2 题，本题正确率 +100%。",
+    "description": "每场考试前 2 题，正确率 +100%。",
     "modifiers": [],
     "triggers": [
       {
@@ -788,7 +788,7 @@ export const LOCAL_ARTIFACTS = [
       "position",
       "multiplier"
     ],
-    "description": "每场考试前 8 题，本题得分倍率 -0.8；第 9 题起，本题得分倍率 +0.8。",
+    "description": "每场考试前 8 题，得分倍率 -0.8；第 9 题起，得分倍率 +0.8。",
     "modifiers": [],
     "triggers": [
       {
@@ -1038,7 +1038,7 @@ export const LOCAL_ARTIFACTS = [
       "score_pattern",
       "exam_multiplier"
     ],
-    "description": "每科考试结束时，若结算前考试原始分为顺子，则本场考试倍率 +20。",
+    "description": "每科考试结束时，若结算前考试原始分为连续数字，则本场考试倍率 +20。",
     "modifiers": [],
     "triggers": [
       {
@@ -1138,7 +1138,7 @@ export const LOCAL_ARTIFACTS = [
       "accuracy",
       "multiplier"
     ],
-    "description": "超出 100% 的当前正确率转换为本题得分倍率加成。",
+    "description": "超出 100% 的当前正确率转换为题目得分倍率加成。",
     "modifiers": [],
     "triggers": [
       {
@@ -1196,7 +1196,7 @@ export const LOCAL_ARTIFACTS = [
       "position",
       "multiplier"
     ],
-    "description": "每场考试每第 3 题，本题正确率 x1.5，本题得分倍率 x2。",
+    "description": "每场考试每 3 道题，正确率 x1.5，得分倍率 x2。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -1237,16 +1237,16 @@ export const LOCAL_ARTIFACTS = [
       "position",
       "multiplier"
     ],
-    "description": "每场考试第 10 题，本题正确率 x2，本题得分倍率 x5。",
+    "description": "每场考试每 10 道题，正确率 x2，得分倍率 x5。",
     "modifiers": [
       {
         "target": "finalAccuracy",
         "mode": "multiply",
         "value": 2,
         "condition": {
-          "kind": "questionIndex",
-          "op": "eq",
-          "value": 10
+          "kind": "questionModulo",
+          "modulo": 10,
+          "equals": 0
         }
       }
     ],
@@ -1254,9 +1254,9 @@ export const LOCAL_ARTIFACTS = [
       {
         "timing": "QUESTION_SCORE",
         "condition": {
-          "kind": "questionIndex",
-          "op": "eq",
-          "value": 10
+          "kind": "questionModulo",
+          "modulo": 10,
+          "equals": 0
         },
         "effects": [
           {
@@ -1277,7 +1277,7 @@ export const LOCAL_ARTIFACTS = [
       "stamina",
       "multiplier"
     ],
-    "description": "体力高于 100% 时，本题得分倍率 x1.5。",
+    "description": "体力高于 100% 时，题目得分倍率 x1.5。",
     "modifiers": [],
     "triggers": [
       {
@@ -1481,7 +1481,7 @@ export const LOCAL_ARTIFACTS = [
       "position",
       "multiplier"
     ],
-    "description": "每场考试最后一题，本题得分倍率 x10。",
+    "description": "每场考试最后一题，该题得分倍率 x10。",
     "modifiers": [],
     "triggers": [
       {
@@ -1504,7 +1504,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "no_external_things",
-    "name": "无须外物",
+    "name": "心外无物",
     "rarity": "special",
     "tags": [
       "artifact",

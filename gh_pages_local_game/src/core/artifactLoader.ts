@@ -26,7 +26,7 @@ const TIMINGS: Set<Timing> = new Set([
 const RARITIES: Set<Rarity> = new Set(["common", "uncommon", "rare", "special"]);
 
 export async function loadArtifacts(
-  filePath = path.join(process.cwd(), "data", "artifacts")
+  filePath = path.join(process.cwd(), "data", "artifacts.json")
 ): Promise<ArtifactConfig[]> {
   const parsed = await readArtifactJson(filePath);
   return validateArtifacts(parsed);

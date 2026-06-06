@@ -9,6 +9,12 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: "gh_pages_local_game/index.html",
+        debug: "gh_pages_local_game/debug/index.html"
+      }
+    }
   }
 });

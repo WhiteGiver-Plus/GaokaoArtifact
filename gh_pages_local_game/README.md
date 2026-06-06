@@ -7,6 +7,10 @@
 - `npm run game:dev`
 - `npm run game:build`
 
+帮助：
+
+- [HELP.md](./HELP.md)
+
 范围：
 
 - 页面入口：`index.html`

@@ -14,12 +14,14 @@
 │     ├─ main.ts
 │     ├─ artifacts.generated.ts
 │     └─ core/                 # 本地游戏内置规则引擎
-├─ data/artifacts/*.json       # 遗物数据源
+├─ data/artifacts.json         # 遗物数据源
 ├─ package.json
 └─ tsconfig.json
 ```
 
 ## 使用
+
+玩法与状态说明见 [`gh_pages_local_game/HELP.md`](./gh_pages_local_game/HELP.md)。
 
 安装依赖：
 
@@ -27,7 +29,7 @@
 npm install
 ```
 
-重新从 `data/artifacts/*.json` 生成前端内嵌数据：
+重新从 `data/artifacts.json` 生成前端内嵌数据：
 
 ```powershell
 npm run game:data

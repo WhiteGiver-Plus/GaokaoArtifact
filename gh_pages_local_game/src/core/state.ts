@@ -40,10 +40,11 @@ export function createGameState(
     exams: [],
     stats: {
       baseAccuracy: 50,
+      baseStamina: 100,
       stamina: 100,
       staminaDecay: 5,
       staminaFloor: 0,
-      artifactLimit: 8,
+      artifactLimit: 9,
       draftChoicesBonus: 0,
       nextDraftChoicesBonus: 0,
       questionMultiplierBase: 1,

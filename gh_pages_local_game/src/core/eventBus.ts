@@ -34,11 +34,11 @@ export function sortEventEntries(entries: EventBusEntry[]): EventBusEntry[] {
   return [...entries].sort(
     (a, b) =>
       a.phase - b.phase ||
+      a.slotIndex - b.slotIndex ||
+      a.triggerIndex - b.triggerIndex ||
       targetRank(a.trigger) - targetRank(b.trigger) ||
       a.calcLayer - b.calcLayer ||
-      a.order - b.order ||
-      a.slotIndex - b.slotIndex ||
-      a.triggerIndex - b.triggerIndex
+      a.order - b.order
   );
 }
 
