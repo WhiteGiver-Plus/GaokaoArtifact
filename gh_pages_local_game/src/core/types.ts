@@ -205,7 +205,11 @@ export interface ExamLog {
 export interface RunResult {
   seed: string;
   subjects: SubjectId[];
+  year: number;
+  threshold: number;
+  artifactIds: string[];
   artifactNames: string[];
+  carryoverStats: RunStats;
   exams: ExamLog[];
   totalScore: number;
   log: string[];
@@ -245,6 +249,13 @@ export interface GameOptions {
   subjects?: SubjectId[];
   autoPolicy?: "first" | "random" | "rare";
   initialArtifacts?: string[];
+  initialArtifactMode?: "gain" | "load";
+  carryoverStats?: Partial<RunStats>;
+  year?: number;
+  threshold?: number;
+  openingDrafts?: number;
+  preExamDrafts?: boolean;
+  postExamDrafts?: boolean;
 }
 
 export interface DraftOffer {

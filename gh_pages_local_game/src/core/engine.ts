@@ -35,21 +35,36 @@ export async function runGame(
   const seed = options.seed ?? defaultSeed();
   const subjects = normalizeSubjects(options.subjects);
   const state = createGameState(seed, subjects, artifactConfigs);
+  const year = options.year ?? 1;
+  const threshold = options.threshold ?? 750;
   state.onLog = hooks.onLog;
+  applyCarryoverStats(state, options.carryoverStats);
 
   if (options.initialArtifacts) {
     for (const artifactId of options.initialArtifacts) {
-      await gainArtifact(state, artifactId, hooks, options);
+      if (options.initialArtifactMode === "load") {
+        loadArtifact(state, artifactId);
+      } else {
+        await gainArtifact(state, artifactId, hooks, options);
+      }
+    }
+    if (options.initialArtifactMode === "load") {
+      emitArtifactsChanged(state, hooks);
     }
   } else {
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < (options.openingDrafts ?? 6); i += 1) {
       await draftArtifact(state, hooks, options, 4, "开局遗物");
     }
   }
 
   for (let i = 0; i < subjects.length; i += 1) {
+    if (options.preExamDrafts) {
+      await draftArtifact(state, hooks, options, 4, `第 ${year} 年考前遗物`);
+    }
     await runExam(state, subjects[i], i, hooks, options);
-    await draftArtifact(state, hooks, options, 4, "考试结束奖励");
+    if (options.postExamDrafts ?? true) {
+      await draftArtifact(state, hooks, options, 4, "考试结束奖励");
+    }
   }
 
   await triggerEvent(state, "RUN_END", undefined, hooks, options);
@@ -59,7 +74,11 @@ export async function runGame(
   const result = {
     seed,
     subjects,
+    year,
+    threshold,
+    artifactIds: state.artifacts.map((owned) => owned.artifactId),
     artifactNames: state.artifacts.map((owned) => artifactName(state, owned)),
+    carryoverStats: captureCarryoverStats(state),
     exams: state.exams,
     totalScore,
     log: state.log
@@ -76,6 +95,34 @@ function normalizeSubjects(subjects?: SubjectId[]): SubjectId[] {
 
 function artifactName(state: GameState, owned: OwnedArtifact): string {
   return state.artifactById.get(owned.artifactId)?.name ?? owned.artifactId;
+}
+
+function applyCarryoverStats(state: GameState, carryoverStats?: Partial<GameState["stats"]>): void {
+  if (!carryoverStats) {
+    return;
+  }
+  state.stats = {
+    ...state.stats,
+    ...carryoverStats,
+    currentTotalAdjustment: 0
+  };
+  state.stats.stamina = Math.max(state.stats.staminaFloor, state.stats.stamina);
+}
+
+function captureCarryoverStats(state: GameState): GameState["stats"] {
+  return {
+    ...state.stats,
+    stamina: Math.max(state.stats.staminaFloor, state.stats.baseStamina),
+    currentTotalAdjustment: 0
+  };
+}
+
+function loadArtifact(state: GameState, artifactId: string): void {
+  const config = state.artifactById.get(artifactId);
+  if (!config) {
+    throw new Error(`Unknown artifact: ${artifactId}`);
+  }
+  state.artifacts.push(createOwnedArtifact(state, artifactId));
 }
 
 function ownedArtifactConfigs(state: GameState): ArtifactConfig[] {

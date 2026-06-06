@@ -5,6 +5,7 @@ import {
   runGame,
   SUBJECT_LABELS,
   type ArtifactConfig,
+  type ChoiceHooks,
   type ExamLog,
   type LiveExamStatus,
   type QuestionLog,
@@ -67,6 +68,17 @@ interface VisualEvent {
   chainIndex?: number;
 }
 
+interface SharedReport {
+  playerName: string;
+  seed: string;
+  score: number;
+  year: number;
+  threshold: number;
+  title: string;
+  subjects: Array<{ label: string; score: string }>;
+  artifacts: string[];
+}
+
 interface StatDelta {
   key: keyof LiveExamStatus;
   label: string;
@@ -98,7 +110,11 @@ interface UiState {
   currentQuestion?: QuestionLog;
   waitingNext?: () => void;
   result?: RunResult;
+  sharedReport?: SharedReport;
   scoreChoicePrompt?: ScoreChoicePrompt;
+  endlessActive: boolean;
+  endlessYear: number;
+  scoreThreshold: number;
   autoPlay: boolean;
   speedMs: number;
   debugArtifactIds: string[];
@@ -129,6 +145,10 @@ const state: UiState = {
   chainCount: 0,
   scoreAdjustment: 0,
   draftSequence: 0,
+  sharedReport: readSharedReport(),
+  endlessActive: false,
+  endlessYear: 1,
+  scoreThreshold: 750,
   autoPlay: true,
   speedMs: 920,
   debugArtifactIds: DEBUG_ROUTE ? readDebugArtifactIds() : [],
@@ -176,6 +196,14 @@ root.addEventListener("click", (event) => {
   }
   if (action === "start-run") {
     void restartRun(false);
+    return;
+  }
+  if (action === "continue-endless") {
+    void continueEndlessRun();
+    return;
+  }
+  if (action === "copy-share-link") {
+    void copyShareLink();
     return;
   }
   if (action === "add-debug-artifact") {
@@ -287,6 +315,7 @@ function renderTopbar(): string {
 }
 
 function renderPhase(): string {
+  if (state.sharedReport && state.phase === "start") return renderSharedReport(state.sharedReport);
   if (state.phase === "start") return renderStart();
   if (state.phase === "draft" && state.choicePrompt) return renderDraft(state.choicePrompt);
   if (state.phase === "exam" && state.activeExam) return renderExam();
@@ -623,11 +652,11 @@ function renderExam(): string {
     <section class="game-grid compact-exam-grid">
       <section class="exam-stage exam-paper fx-stage fx-${intensity}" aria-label="当前答题与词条触发">
         ${renderExamHeader(exam, pending)}
-        ${renderScreenFx()}
-        ${renderTriggerOverlay()}
-        <div class="exam-priority">
-          ${renderQuestionCard(exam, question)}
-          ${renderTriggerStage()}
+      ${renderScreenFx()}
+      ${renderTriggerOverlay()}
+      <div class="exam-priority">
+        ${renderQuestionCard(exam, question)}
+        ${renderTriggerStage()}
         </div>
         <div class="exam-controls">
           <button class="primary-button" type="button" data-action="next-question" ${state.waitingNext ? "" : "disabled"}>判定下一题</button>
@@ -699,7 +728,7 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
               <strong>${escapeHtml(trigger.label)}</strong>
               <small>${escapeHtml(trigger.effectText || "联动生效")}</small>
             </div>`
-          : `<div class="paper-trigger-banner status-trigger-banner idle"><span>等待</span><strong>触发队列</strong><small>${state.triggerQueue.length} 个待播放</small></div>`
+          : ""
       }
       <div class="paper-progress-row">
         <div class="budget-bar" aria-label="答题点进度"><span style="width:${progress}%"></span></div>
@@ -806,7 +835,7 @@ function renderTriggerStage(): string {
                     `<span class="event-chip chip-${event.tone} chip-${event.intensity} ${index === 0 ? "current" : "queued"}">${escapeHtml(event.label)}</span>`
                 )
                 .join("")
-            : `<span class="event-chip chip-idle">等待盖章</span>`
+            : ""
         }
       </div>
       ${state.activeTrigger ? `<div class="trigger-beam beam-${state.activeTrigger.intensity}"></div>` : ""}
@@ -864,7 +893,6 @@ function renderStateDrawer(exam: NonNullable<UiState["activeExam"]>, pending: nu
         <div class="stat-row"><span>体力</span><strong>${formatNumber(state.liveStatus.stamina)}%</strong></div>
         <div class="stat-row"><span>基础体力</span><strong>${formatNumber(state.liveStatus.baseStamina)}%</strong></div>
         <div class="stat-row"><span>自动</span><strong>${state.autoPlay ? "ON" : "OFF"}</strong></div>
-        <div class="mini-note">触发队列：${state.triggerQueue.length} 个待播放</div>
       </div>
     </details>
   `;
@@ -914,19 +942,23 @@ function renderHelpDoc(): string {
     <div class="help-doc">
       <section>
         <h3>开局</h3>
-        <p>先从候选遗物中选择开局构筑，再完成语文、数学、英语和 3 门自选科目的六场考试。</p>
+        <p>先进行 6 次开局 4 选 1 遗物，再完成语文、数学、英语和 3 门自选科目的 6 场考试。</p>
       </section>
       <section>
-        <h3>体力</h3>
-        <p>状态显示框中的体力会影响正确率。每场考试开始时，当前体力先恢复为基础体力；随后再结算考试开始触发的遗物。</p>
+        <h3>题目</h3>
+        <p>每科 15 题，每题基础 10 分，单科满分 150 分，六科标准满分 900 分；答对得 10 x 本题倍率，答错通常不得分。</p>
       </section>
       <section>
-        <h3>倍率</h3>
-        <p>本题得分倍率只影响当前题目；本场考试得分倍率会在本场交卷时作用到整场原始分。</p>
+        <h3>正确率</h3>
+        <p>判题时先算最终正确率 = 基础正确率 x 当前体力 / 100 + 本题正确率加成，再被相关遗物修正；随机掷骰小于正确率则答对，判定区间按 0% 到 100% 夹紧。</p>
       </section>
       <section>
-        <h3>触发</h3>
-        <p>遗物按触发时机和准考证顺序依次结算。状态栏上方会显示当前触发，数字浮标表示倍率或体力变化。</p>
+        <h3>体力与倍率</h3>
+        <p>默认基础体力 100%，每题结算后体力 -5%。每科开考前体力恢复到基础体力；本题倍率只影响当前题，本场倍率在交卷时乘到本场原始分。</p>
+      </section>
+      <section>
+        <h3>无尽模式</h3>
+        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，通关门槛从 750 开始每年上涨 30%。</p>
       </section>
       <section>
         <h3>操作</h3>
@@ -968,21 +1000,34 @@ function logTone(line: string): "good" | "warn" | "wild" {
 
 function renderResult(result: RunResult): string {
   const overflow = Math.max(0, result.totalScore - 750);
+  const passedThreshold = result.totalScore > result.threshold;
+  const nextThreshold = nextEndlessThreshold(result.threshold);
   const title = resultTitle(result.totalScore);
   return `
     <section class="result-screen">
       <div class="result-card">
-        <p class="mono-label">FINAL SCORE</p>
+        <p class="mono-label">${state.endlessActive ? `ENDLESS YEAR ${result.year}` : "FINAL SCORE"}</p>
         <div class="final-score ${result.totalScore > 750 ? "over-score" : ""}">${result.totalScore}</div>
         <h1>${title}</h1>
-        <p>${escapeHtml(state.playerName || "考生")} 的六科已交卷。你的准考证上共有 ${state.artifacts.length} 条词条，溢出分 ${overflow}。</p>
+        <p>${escapeHtml(state.playerName || "考生")} 的六科已交卷。你的准考证上共有 ${state.artifacts.length} 条词条，当前门槛 ${result.threshold} 分，溢出分 ${overflow}。</p>
+        <div class="endless-panel ${passedThreshold ? "passed" : "failed"}">
+          <div>
+            <span>${passedThreshold ? "无尽模式可继续" : "本轮战报封存"}</span>
+            <strong>${passedThreshold ? `下一年门槛 ${nextThreshold}` : `未超过 ${result.threshold}`}</strong>
+          </div>
+          <p>${passedThreshold ? "进入下一年后，保留当前遗物组；每科开考前获得一次 4 选 1，分数门槛上涨 30%。" : "超过 750 分后才可进入无尽模式；无尽年需要继续超过当年门槛。"}</p>
+        </div>
         ${renderShareCard(result, title, overflow)}
         <div class="result-subjects">
           ${result.exams
             .map((exam) => `<div><span>${SUBJECT_LABELS[exam.subject]}</span><strong>${exam.score}</strong></div>`)
             .join("")}
         </div>
-        <button class="primary-button" type="button" data-action="restart">重新开始</button>
+        <div class="result-actions">
+          ${passedThreshold ? `<button class="primary-button" type="button" data-action="continue-endless">进入第 ${result.year + 1} 年</button>` : ""}
+          <button class="secondary-button" type="button" data-action="copy-share-link">复制战报链接</button>
+          <button class="secondary-button" type="button" data-action="restart">重新开始</button>
+        </div>
       </div>
       ${renderLogStandalone()}
     </section>
@@ -995,15 +1040,16 @@ function renderShareCard(result: RunResult, title: string, overflow: number): st
       <div class="share-card-paper">
         <div class="share-card-head">
           <div><span class="mono-label">REPORT CARD</span><strong>准考证战报</strong></div>
-          <span>${overflow > 0 ? `OVER +${overflow}` : "本地战报"}</span>
+          <span>${result.year > 1 ? `YEAR ${result.year}` : overflow > 0 ? `OVER +${overflow}` : "本地战报"}</span>
         </div>
         <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(state.playerName || "考生")}</strong></div>
         <div class="share-card-score ${result.totalScore > 750 ? "over-score" : ""}">${result.totalScore}</div>
         <h2>${title}</h2>
         <div class="share-card-meta">
           <span>SEED ${escapeHtml(result.seed)}</span>
-          <span>${overflow > 0 ? `OVER +${overflow}` : "750 以内"}</span>
+          <span>门槛 ${result.threshold}</span>
         </div>
+        <div class="share-card-hand"><span>无尽年</span><strong>${result.year}</strong></div>
         <div class="share-card-subjects">
           ${result.exams
             .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${exam.score}</strong></span>`)
@@ -1024,12 +1070,56 @@ function renderShareCard(result: RunResult, title: string, overflow: number): st
   `;
 }
 
+function renderSharedReport(report: SharedReport): string {
+  const overflow = Math.max(0, report.score - 750);
+  return `
+    <section class="result-screen shared-result-screen">
+      <div class="result-card">
+        <p class="mono-label">SHARED REPORT</p>
+        <div class="final-score ${report.score > 750 ? "over-score" : ""}">${report.score}</div>
+        <h1>${escapeHtml(report.title)}</h1>
+        <p>${escapeHtml(report.playerName)} 的分享战报。第 ${report.year} 年，门槛 ${report.threshold} 分，溢出分 ${overflow}。</p>
+        <section class="share-card-preview" aria-label="分享战报">
+          <div class="share-card-paper">
+            <div class="share-card-head">
+              <div><span class="mono-label">REPORT CARD</span><strong>准考证战报</strong></div>
+              <span>YEAR ${report.year}</span>
+            </div>
+            <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(report.playerName)}</strong></div>
+            <div class="share-card-score ${report.score > 750 ? "over-score" : ""}">${report.score}</div>
+            <h2>${escapeHtml(report.title)}</h2>
+            <div class="share-card-meta">
+              <span>SEED ${escapeHtml(report.seed)}</span>
+              <span>门槛 ${report.threshold}</span>
+            </div>
+            <div class="share-card-subjects">
+              ${report.subjects
+                .map((exam) => `<span>${escapeHtml(exam.label)} <strong>${escapeHtml(exam.score)}</strong></span>`)
+                .join("")}
+            </div>
+            <div class="share-card-terms">
+              ${report.artifacts.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}
+            </div>
+          </div>
+        </section>
+        <div class="result-actions">
+          <button class="primary-button" type="button" data-action="restart">本地开考</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function resultTitle(score: number): string {
   if (score >= 1000) return "满分已经失去行政意义";
   if (score > 850) return "招生办正在刷新页面";
   if (score > 750) return "分数溢出了答题卡";
   if (score > 620) return "稳定上岸，但准考证看起来不太合法";
   return "命题组还活着";
+}
+
+function nextEndlessThreshold(threshold: number): number {
+  return Math.ceil(threshold * 1.3);
 }
 
 function renderFooter(): string {
@@ -1083,6 +1173,84 @@ function buildIssueUrl(): string {
     body: buildIssueBody()
   });
   return `https://github.com/WhiteGiver-Plus/GaokaoArtifact/issues/new?${params.toString()}`;
+}
+
+async function copyShareLink(): Promise<void> {
+  const result = state.result;
+  if (!result) return;
+  const link = buildShareUrl(result);
+  try {
+    await navigator.clipboard.writeText(link);
+    showFooterNotice("战报链接已复制。");
+  } catch {
+    showFooterNotice(link);
+  }
+}
+
+function buildShareUrl(result: RunResult): string {
+  const report: SharedReport = {
+    playerName: state.playerName || "考生",
+    seed: result.seed,
+    score: result.totalScore,
+    year: result.year,
+    threshold: result.threshold,
+    title: resultTitle(result.totalScore),
+    subjects: result.exams.map((exam) => ({
+      label: SUBJECT_LABELS[exam.subject],
+      score: String(exam.score)
+    })),
+    artifacts: state.artifacts.slice(-6).reverse().map((artifact) => artifact.name)
+  };
+  const params = new URLSearchParams({ report: encodeShareReport(report) });
+  const url = new URL(window.location.href);
+  url.search = params.toString();
+  url.hash = "";
+  return url.toString();
+}
+
+function readSharedReport(): SharedReport | undefined {
+  try {
+    const raw = new URLSearchParams(window.location.search).get("report");
+    if (!raw) return undefined;
+    return normalizeSharedReport(JSON.parse(decodeURIComponent(escape(window.atob(raw)))));
+  } catch {
+    return undefined;
+  }
+}
+
+function encodeShareReport(report: SharedReport): string {
+  return window.btoa(unescape(encodeURIComponent(JSON.stringify(report))));
+}
+
+function normalizeSharedReport(value: unknown): SharedReport | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const report = value as Partial<SharedReport>;
+  if (
+    typeof report.playerName !== "string" ||
+    typeof report.seed !== "string" ||
+    typeof report.score !== "number" ||
+    typeof report.year !== "number" ||
+    typeof report.threshold !== "number" ||
+    typeof report.title !== "string" ||
+    !Array.isArray(report.subjects) ||
+    !Array.isArray(report.artifacts)
+  ) {
+    return undefined;
+  }
+  return {
+    playerName: report.playerName,
+    seed: report.seed,
+    score: Math.round(report.score),
+    year: Math.max(1, Math.round(report.year)),
+    threshold: Math.max(750, Math.round(report.threshold)),
+    title: report.title,
+    subjects: report.subjects
+      .filter((item): item is { label: string; score: string } =>
+        Boolean(item && typeof item === "object" && typeof item.label === "string" && typeof item.score === "string")
+      )
+      .slice(0, 12),
+    artifacts: report.artifacts.filter((item): item is string => typeof item === "string").slice(0, 12)
+  };
 }
 
 function buildIssueBody(): string {
@@ -1291,6 +1459,7 @@ function resetRunState(): void {
   state.currentQuestion = undefined;
   state.waitingNext = undefined;
   state.result = undefined;
+  state.sharedReport = undefined;
   state.scoreChoicePrompt = undefined;
   state.speedMs = 920;
 }
@@ -1306,6 +1475,9 @@ function resetToStart(newSeed: boolean): void {
 async function restartRun(newSeed: boolean): Promise<void> {
   state.runId += 1;
   if (newSeed) state.seed = defaultSeed();
+  state.endlessActive = false;
+  state.endlessYear = 1;
+  state.scoreThreshold = 750;
   resetRunState();
   state.phase = "loading";
   render();
@@ -1318,7 +1490,43 @@ async function restartRun(newSeed: boolean): Promise<void> {
     autoPolicy: initialArtifacts ? "first" as const : undefined
   };
 
-  await runGame(LOCAL_ARTIFACTS, options, {
+  await runGame(LOCAL_ARTIFACTS, options, createRunHooks(runId));
+  if (isCurrentRun(runId)) render();
+}
+
+async function continueEndlessRun(): Promise<void> {
+  const previous = state.result;
+  if (!previous || previous.totalScore <= previous.threshold) {
+    return;
+  }
+  state.runId += 1;
+  state.endlessActive = true;
+  state.endlessYear = previous.year + 1;
+  state.scoreThreshold = nextEndlessThreshold(previous.threshold);
+  state.seed = `${previous.seed}-Y${state.endlessYear}`;
+  resetRunState();
+  state.phase = "loading";
+  render();
+  const runId = state.runId;
+  const options = {
+    seed: state.seed,
+    subjects: state.subjects,
+    initialArtifacts: previous.artifactIds,
+    initialArtifactMode: "load" as const,
+    carryoverStats: previous.carryoverStats,
+    year: state.endlessYear,
+    threshold: state.scoreThreshold,
+    openingDrafts: 0,
+    preExamDrafts: true,
+    postExamDrafts: false
+  };
+
+  await runGame(LOCAL_ARTIFACTS, options, createRunHooks(runId));
+  if (isCurrentRun(runId)) render();
+}
+
+function createRunHooks(runId: number): ChoiceHooks {
+  return {
     chooseArtifact: (choices, reason) => promptChoice(runId, choices, reason, false),
     chooseDiscard: (owned) => promptChoice(runId, owned, "遗物已达上限", true),
     onLog: (line) => {
@@ -1419,8 +1627,7 @@ async function restartRun(newSeed: boolean): Promise<void> {
       state.result = result;
       state.phase = "result";
     }
-  });
-  if (isCurrentRun(runId)) render();
+  };
 }
 
 function promptChoice(
