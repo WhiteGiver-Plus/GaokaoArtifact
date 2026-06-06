@@ -1,0 +1,77 @@
+[
+  {
+    "id": "happy_clown",
+    "name": "欢乐小丑",
+    "source": "小丑牌",
+    "rarity": "uncommon",
+    "tags": ["score_pattern", "exam_multiplier"],
+    "description": "每科考试结束时，本场考试分数中包含两个相同数字，则本场考试倍率 +2。",
+    "triggers": [
+      {
+        "timing": "EXAM_END",
+        "condition": { "kind": "scoreRepeatedDigit", "count": 2 },
+        "effects": [{ "op": "addExamMultiplier", "value": 2 }]
+      }
+    ]
+  },
+  {
+    "id": "slippery_clown",
+    "name": "滑稽小丑",
+    "source": "小丑牌",
+    "rarity": "rare",
+    "tags": ["score_pattern", "exam_multiplier"],
+    "description": "每科考试结束时，本场考试分数中包含三个相同数字，则本场考试倍率 +10。",
+    "triggers": [
+      {
+        "timing": "EXAM_END",
+        "condition": { "kind": "scoreRepeatedDigit", "count": 3 },
+        "effects": [{ "op": "addExamMultiplier", "value": 10 }]
+      }
+    ]
+  },
+  {
+    "id": "crazy_clown",
+    "name": "狂小丑",
+    "source": "小丑牌",
+    "rarity": "rare",
+    "tags": ["score_pattern", "exam_multiplier"],
+    "description": "每科考试结束时，本场考试分数为顺子，则本场考试倍率 +20。",
+    "triggers": [
+      {
+        "timing": "EXAM_END",
+        "condition": { "kind": "scoreStraight" },
+        "effects": [{ "op": "addExamMultiplier", "value": 20 }]
+      }
+    ]
+  },
+  {
+    "id": "tesseract",
+    "name": "宇宙立方",
+    "source": "漫威梗",
+    "rarity": "uncommon",
+    "tags": ["score_pattern", "exam_score"],
+    "description": "若本场考试分数为立方数，增加 200 额外分。",
+    "triggers": [
+      {
+        "timing": "EXAM_END",
+        "condition": { "kind": "scoreCube" },
+        "effects": [{ "op": "addExamPostBonus", "value": 200 }]
+      }
+    ]
+  },
+  {
+    "id": "weeb_square",
+    "name": "唉，二次元",
+    "source": "二次元梗",
+    "rarity": "common",
+    "tags": ["score_pattern", "exam_score"],
+    "description": "若本场考试分数为平方数，增加 50 额外分。",
+    "triggers": [
+      {
+        "timing": "EXAM_END",
+        "condition": { "kind": "scoreSquare" },
+        "effects": [{ "op": "addExamPostBonus", "value": 50 }]
+      }
+    ]
+  }
+]

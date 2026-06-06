@@ -1,0 +1,905 @@
+import type {
+  ArtifactConfig,
+  ArtifactTriggerConfig,
+  ChoiceHooks,
+  EffectConfig,
+  ExamLog,
+  ExamState,
+  GameOptions,
+  OwnedArtifact,
+  QuestionModifier,
+  RunResult,
+  SubjectId,
+  Timing,
+  TriggerContext
+} from "./types.js";
+import { ELECTIVE_SUBJECTS, REQUIRED_SUBJECTS, SUBJECT_LABELS } from "./types.js";
+import { defaultSeed } from "./rng.js";
+import { appendLog, createGameState, createOwnedArtifact, type GameState } from "./state.js";
+import { evaluateCondition } from "./conditions.js";
+import { applyEffect } from "./effects.js";
+import { clamp } from "./math.js";
+import { collectEventEntries, sortEventEntries } from "./eventBus.js";
+import { calcLayerForEffects, phaseForTiming } from "./phases.js";
+import { queryModifierValue } from "./modifierSystem.js";
+
+const EVENT_TRIGGER_LIMIT = 20;
+
+export async function runGame(
+  artifactConfigs: ArtifactConfig[],
+  options: GameOptions = {},
+  hooks: ChoiceHooks = {}
+): Promise<RunResult> {
+  const seed = options.seed ?? defaultSeed();
+  const subjects = normalizeSubjects(options.subjects);
+  const state = createGameState(seed, subjects, artifactConfigs);
+  state.onLog = hooks.onLog;
+
+  for (let i = 0; i < 5; i += 1) {
+    await draftArtifact(state, hooks, options, 3, "开局遗物");
+  }
+
+  for (let i = 0; i < subjects.length; i += 1) {
+    await runExam(state, subjects[i], i, hooks, options);
+    await draftArtifact(state, hooks, options, 3, "考试结束奖励");
+  }
+
+  await triggerEvent(state, "RUN_END", undefined, hooks, options);
+  const rawTotal = state.exams.reduce((sum, exam) => sum + exam.score, 0);
+  const totalScore = Math.round(rawTotal * calculateRunMultiplier(state) + state.stats.runPostBonus);
+
+  const result = {
+    seed,
+    subjects,
+    artifactNames: state.artifacts.map((owned) => artifactName(state, owned)),
+    exams: state.exams,
+    totalScore,
+    log: state.log
+  };
+  hooks.onRunEnd?.(result);
+  return result;
+}
+
+function normalizeSubjects(subjects?: SubjectId[]): SubjectId[] {
+  const electives = subjects?.filter((subject) => !REQUIRED_SUBJECTS.includes(subject as never));
+  const selectedElectives = electives?.length === 3 ? electives : ELECTIVE_SUBJECTS.slice(0, 3);
+  return [...REQUIRED_SUBJECTS, ...selectedElectives];
+}
+
+function artifactName(state: GameState, owned: OwnedArtifact): string {
+  return state.artifactById.get(owned.artifactId)?.name ?? owned.artifactId;
+}
+
+function ownedArtifactConfigs(state: GameState): ArtifactConfig[] {
+  return state.artifacts
+    .map((owned) => state.artifactById.get(owned.artifactId))
+    .filter((artifact): artifact is ArtifactConfig => Boolean(artifact));
+}
+
+function emitArtifactsChanged(state: GameState, hooks: ChoiceHooks): void {
+  hooks.onArtifactsChanged?.(ownedArtifactConfigs(state));
+}
+
+async function draftArtifact(
+  state: GameState,
+  hooks: ChoiceHooks,
+  options: GameOptions,
+  baseChoices: number,
+  reason: string
+): Promise<void> {
+  const choiceCount = Math.max(
+    1,
+    baseChoices +
+      queryModifierValue(state, "draftChoicesBonus", state.stats.draftChoicesBonus) +
+      state.stats.nextDraftChoicesBonus
+  );
+  state.stats.nextDraftChoicesBonus = 0;
+  const choices = createDraftChoices(state, choiceCount);
+  if (choices.length === 0) {
+    appendLog(state, `${reason}: 遗物池已空。`);
+    return;
+  }
+  const pickedIndex = await chooseArtifactIndex(choices, reason, hooks, options, state);
+  await gainArtifact(state, choices[pickedIndex].id, hooks, options);
+}
+
+function createDraftChoices(state: GameState, count: number): ArtifactConfig[] {
+  const available = state.artifactConfigs.filter((artifact) => {
+    if (artifact.draftable === false) {
+      return false;
+    }
+    const ownedCount = state.artifacts.filter((owned) => owned.artifactId === artifact.id).length;
+    return ownedCount < (artifact.maxCopies ?? 1);
+  });
+  return state.rng.shuffle(available).slice(0, count);
+}
+
+async function chooseArtifactIndex(
+  choices: ArtifactConfig[],
+  reason: string,
+  hooks: ChoiceHooks,
+  options: GameOptions,
+  state: GameState
+): Promise<number> {
+  const chosen = hooks.chooseArtifact
+    ? await hooks.chooseArtifact(choices, reason)
+    : autoArtifactChoice(choices, options, state);
+  return clampIndex(chosen, choices.length);
+}
+
+function autoArtifactChoice(
+  choices: ArtifactConfig[],
+  options: GameOptions,
+  state: GameState
+): number {
+  if (options.autoPolicy === "random") {
+    return state.rng.int(choices.length);
+  }
+  if (options.autoPolicy === "rare") {
+    const order = ["special", "rare", "uncommon", "common"];
+    return choices
+      .map((choice, index) => ({ index, rank: order.indexOf(choice.rarity) }))
+      .sort((a, b) => a.rank - b.rank)[0].index;
+  }
+  return 0;
+}
+
+function clampIndex(value: number, length: number): number {
+  if (!Number.isInteger(value)) {
+    return 0;
+  }
+  return Math.min(length - 1, Math.max(0, value));
+}
+
+async function gainArtifact(
+  state: GameState,
+  artifactId: string,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const config = state.artifactById.get(artifactId);
+  if (!config) {
+    throw new Error(`Unknown artifact: ${artifactId}`);
+  }
+  const owned = createOwnedArtifact(state, artifactId);
+  state.artifacts.push(owned);
+  appendLog(state, `获得遗物: ${config.name}`);
+  state.currentEventCount = 0;
+  await triggerOwnedArtifact(state, owned, "ARTIFACT_GAINED", undefined, hooks, options);
+  emitArtifactsChanged(state, hooks);
+  await enforceArtifactLimit(state, hooks, options);
+}
+
+async function enforceArtifactLimit(
+  state: GameState,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  while (state.artifacts.length > queryModifierValue(state, "artifactLimit", state.stats.artifactLimit)) {
+    if (state.stats.preventDiscardCharges > 0) {
+      state.stats.preventDiscardCharges -= 1;
+      appendLog(state, "遗物上限超出，但本次丢弃被免除。");
+      return;
+    }
+    const configs = state.artifacts.map((owned) => state.artifactById.get(owned.artifactId)!);
+    const chosen = hooks.chooseDiscard
+      ? await hooks.chooseDiscard(configs)
+      : autoDiscardIndex(configs, options, state);
+    await loseArtifactAt(state, clampIndex(chosen, state.artifacts.length), hooks, options);
+  }
+}
+
+function autoDiscardIndex(configs: ArtifactConfig[], options: GameOptions, state: GameState): number {
+  if (options.autoPolicy === "random") {
+    return state.rng.int(configs.length);
+  }
+  return 0;
+}
+
+async function loseArtifactAt(
+  state: GameState,
+  index: number,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const [owned] = state.artifacts.splice(index, 1);
+  if (!owned) {
+    return;
+  }
+  const config = state.artifactById.get(owned.artifactId);
+  appendLog(state, `失去遗物: ${config?.name ?? owned.artifactId}`);
+  state.currentEventCount = 0;
+  await triggerOwnedArtifact(state, owned, "ARTIFACT_LOST", undefined, hooks, options, owned);
+  for (const listener of [...state.artifacts]) {
+    await triggerOwnedArtifact(state, listener, "ARTIFACT_LOST", undefined, hooks, options, owned);
+  }
+  emitArtifactsChanged(state, hooks);
+}
+
+async function loseOwnedArtifact(
+  state: GameState,
+  owned: OwnedArtifact,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const index = state.artifacts.findIndex((item) => item.instanceId === owned.instanceId);
+  if (index >= 0) {
+    await loseArtifactAt(state, index, hooks, options);
+  }
+}
+
+async function triggerEvent(
+  state: GameState,
+  timing: Timing,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  state.currentEventCount = 0;
+  const entries = collectEventEntries(state, timing);
+  for (const entry of entries) {
+    await executeTrigger(
+      state,
+      {
+        timing,
+        owner: entry.owned,
+        triggerIndex: entry.triggerIndex,
+        trigger: entry.trigger
+      },
+      exam,
+      hooks,
+      options
+    );
+  }
+}
+
+async function triggerOwnedArtifact(
+  state: GameState,
+  owned: OwnedArtifact,
+  timing: Timing,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions,
+  lostArtifact?: OwnedArtifact,
+  sourceTrigger?: TriggerContext
+): Promise<void> {
+  const config = state.artifactById.get(owned.artifactId);
+  if (!config) {
+    return;
+  }
+  const triggers = sortEventEntries(
+    config.triggers
+      .map((trigger, triggerIndex) => ({
+        owned,
+        trigger,
+        triggerIndex,
+        slotIndex: state.artifacts.findIndex((item) => item.instanceId === owned.instanceId),
+        phase: trigger.phase ?? phaseForTiming(trigger.timing),
+        calcLayer: calcLayerForEffects(trigger.effects),
+        order: trigger.order ?? trigger.priority ?? 500
+      }))
+    .filter((item) => item.trigger.timing === timing)
+  );
+
+  for (const item of triggers) {
+    await executeTrigger(
+      state,
+      {
+        timing,
+        owner: owned,
+        triggerIndex: item.triggerIndex,
+        trigger: item.trigger,
+        lostArtifact,
+        sourceTrigger
+      },
+      exam,
+      hooks,
+      options
+    );
+  }
+}
+
+async function executeTrigger(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  if (state.currentEventCount >= EVENT_TRIGGER_LIMIT) {
+    appendLog(state, "本次结算触发次数达到 20，后续遗物触发被跳过。");
+    return;
+  }
+  if (!evaluateCondition(context.trigger.condition, state, {
+    exam,
+    owner: context.owner,
+    lostArtifact: context.lostArtifact
+  })) {
+    return;
+  }
+  if (!consumeTriggerLimit(state, context, exam)) {
+    return;
+  }
+
+  state.currentEventCount += 1;
+  const config = state.artifactById.get(context.owner.artifactId);
+  const effectText = describeTrigger(context.trigger);
+  appendLog(
+    state,
+    `触发遗物: ${config?.name ?? context.owner.artifactId}${effectText ? ` -> ${effectText}` : ""}`
+  );
+
+  for (const effect of context.trigger.effects ?? []) {
+    await applyEffect(effect, state, {
+      owner: context.owner,
+      exam,
+      gainRandomArtifacts: async (count) => gainRandomArtifacts(state, count, hooks, options),
+      offerDraft: async (choices, picks) => offerDraft(state, choices, picks, hooks, options),
+      destroySelf: async () => loseOwnedArtifact(state, context.owner, hooks, options),
+      destroyOther: async (select) => destroyOtherArtifact(state, context.owner, select, hooks, options),
+      destroyAllOther: async () => destroyAllOtherArtifacts(state, context.owner, hooks, options),
+      chooseOnesDigit: async (score, currentExam) =>
+        hooks.chooseOnesDigit ? hooks.chooseOnesDigit(Math.round(score), currentExam.subject) : undefined,
+      chooseDigitSwap: async (score, currentExam) =>
+        hooks.chooseDigitSwap ? hooks.chooseDigitSwap(Math.round(score), currentExam.subject) : undefined
+    });
+  }
+
+  if (context.trigger.handler) {
+    await applyTriggerHandler(state, context, exam, hooks, options);
+  }
+
+  if (!context.replay && context.timing !== "OTHER_ARTIFACT_TRIGGERED") {
+    await notifyOtherArtifactTriggered(state, context, exam, hooks, options);
+  }
+}
+
+function describeTrigger(trigger: ArtifactTriggerConfig): string {
+  const effects = (trigger.effects ?? []).map(describeEffect).filter(Boolean);
+  if (trigger.handler) {
+    effects.push(`执行联动 ${trigger.handler}`);
+  }
+  return effects.join("；");
+}
+
+function describeEffect(effect: EffectConfig): string {
+  switch (effect.op) {
+    case "addStat":
+      return `${statLabel(effect.stat)} ${formatSigned(effect.value)}`;
+    case "setStatMin":
+      return `${statLabel(effect.stat)}下限至少 ${effect.value}`;
+    case "addQuestionAccuracy":
+      return `本题正确率 ${formatSigned(effect.value)}`;
+    case "addQuestionMultiplier":
+      return `本题倍率 ${formatSigned(effect.value)}`;
+    case "multiplyQuestionMultiplier":
+      return `本题倍率 x${effect.value}`;
+    case "multiplyQuestionMultiplierByStreak":
+      return `按${effect.streak === "correct" ? "连对" : "连错"}倍率 x${effect.base}`;
+    case "addQuestionScore":
+      return `本题额外分 ${formatSigned(effect.value)}`;
+    case "convertAccuracyOverflowToQuestionMultiplier":
+      return "超出 100% 正确率转为本题倍率";
+    case "addExamMultiplier":
+      return `考试倍率 ${formatSigned(effect.value)}`;
+    case "multiplyExamMultiplier":
+      return `考试倍率 x${effect.value}`;
+    case "multiplyRunMultiplier":
+      return `总分倍率 x${effect.value}`;
+    case "addExamScore":
+      return `本场分数 ${formatSigned(effect.value)}`;
+    case "addExamPostBonus":
+      return `考试后置额外分 ${formatSigned(effect.value)}`;
+    case "setExamScoreToFull":
+      return "本场分数至少满分";
+    case "addNextExamScore":
+      return `下场考试分数 ${formatSigned(effect.value)}`;
+    case "forceResult":
+      return `强制${effect.result === "correct" ? "改对" : "改错"}`;
+    case "queueQuestionModifier":
+      return `后续 ${effect.duration} 题${effect.target === "accuracy" ? "正确率" : "倍率"} ${formatSigned(effect.value)}`;
+    case "gainRandomArtifacts":
+      return `随机获得 ${effect.count} 个遗物`;
+    case "offerDraft":
+      return `额外 ${effect.choices} 选 ${effect.picks}`;
+    case "destroySelf":
+      return "销毁自身";
+    case "destroyOther":
+      return "销毁其他遗物";
+    case "destroyAllOtherAndMultiplyRun":
+      return `销毁其他遗物，每张总分倍率 x${effect.factorPerDestroyed}`;
+    case "maximizeOnesDigit":
+      return "将个位改成最优数字";
+    case "maximizeDigitSwap":
+      return "交换分数数字以最大化分数";
+    case "preventNextDiscard":
+      return "免除一次丢弃";
+    case "log":
+      return effect.message;
+  }
+}
+
+function statLabel(stat: Extract<EffectConfig, { op: "addStat" }>["stat"] | "staminaFloor"): string {
+  const labels: Record<string, string> = {
+    baseAccuracy: "基础正确率",
+    stamina: "体力",
+    staminaDecay: "体力下降",
+    staminaFloor: "体力下限",
+    artifactLimit: "遗物上限",
+    draftChoicesBonus: "抽取备选数",
+    nextDraftChoicesBonus: "下次抽取备选数",
+    questionMultiplierBase: "常驻本题倍率"
+  };
+  return labels[stat] ?? stat;
+}
+
+function formatSigned(value: number): string {
+  return value >= 0 ? `+${value}` : `${value}`;
+}
+
+function consumeTriggerLimit(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined
+): boolean {
+  const limit = context.trigger.limit;
+  if (!limit) {
+    return true;
+  }
+  const scope = limit.scope === "exam" ? `exam:${exam?.index ?? "none"}` : "run";
+  const key = `${scope}:${context.owner.instanceId}:${context.triggerIndex}`;
+  const used = state.triggerCounts.get(key) ?? 0;
+  if (used >= limit.count) {
+    return false;
+  }
+  state.triggerCounts.set(key, used + 1);
+  return true;
+}
+
+async function gainRandomArtifacts(
+  state: GameState,
+  count: number,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    const choices = createDraftChoices(state, 1);
+    if (choices[0]) {
+      await gainArtifact(state, choices[0].id, hooks, options);
+    }
+  }
+}
+
+async function offerDraft(
+  state: GameState,
+  choices: number,
+  picks: number,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  for (let i = 0; i < picks; i += 1) {
+    await draftArtifact(state, hooks, options, choices, "额外抽取");
+  }
+}
+
+async function destroyOtherArtifact(
+  state: GameState,
+  owner: OwnedArtifact,
+  select: "leftmost" | "rightmost" | "random",
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const candidates = state.artifacts.filter((artifact) => artifact.instanceId !== owner.instanceId);
+  if (candidates.length === 0) {
+    return;
+  }
+  const target =
+    select === "random"
+      ? state.rng.pick(candidates)
+      : select === "rightmost"
+        ? candidates[candidates.length - 1]
+        : candidates[0];
+  await loseOwnedArtifact(state, target, hooks, options);
+}
+
+async function destroyAllOtherArtifacts(
+  state: GameState,
+  owner: OwnedArtifact,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<number> {
+  const targets = state.artifacts.filter((artifact) => artifact.instanceId !== owner.instanceId);
+  for (const target of targets) {
+    await loseOwnedArtifact(state, target, hooks, options);
+  }
+  return targets.length;
+}
+
+async function notifyOtherArtifactTriggered(
+  state: GameState,
+  original: TriggerContext,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const listeners = [...state.artifacts].filter(
+    (artifact) => artifact.instanceId !== original.owner.instanceId
+  );
+  for (const listener of listeners) {
+    await triggerOwnedArtifact(
+      state,
+      listener,
+      "OTHER_ARTIFACT_TRIGGERED",
+      exam,
+      hooks,
+      options
+    );
+  }
+}
+
+async function applyTriggerHandler(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  if (context.trigger.handler === "mimicRight") {
+    await mimicRightArtifact(state, context, exam, hooks, options);
+  }
+  if (context.trigger.handler === "repeatOtherTrigger") {
+    await repeatSourceTrigger(state, context, exam, hooks, options);
+  }
+  if (context.trigger.handler === "triggerRightOnOtherTrigger") {
+    await triggerRightOnOtherTrigger(state, context, exam, hooks, options);
+  }
+  if (context.trigger.handler === "luckyBlock") {
+    triggerLuckyBlock(state, context, exam);
+  }
+}
+
+async function mimicRightArtifact(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const depth = context.mimicDepth ?? 0;
+  if (depth >= 2) {
+    return;
+  }
+  const index = state.artifacts.findIndex((item) => item.instanceId === context.owner.instanceId);
+  const right = state.artifacts[index + 1];
+  if (!right) {
+    return;
+  }
+  const config = state.artifactById.get(right.artifactId);
+  const triggers = config?.triggers
+    .map((trigger, triggerIndex) => ({ trigger, triggerIndex }))
+    .filter((item) => item.trigger.timing === context.timing);
+  for (const item of triggers ?? []) {
+    await executeTrigger(
+      state,
+      {
+        timing: context.timing,
+        owner: right,
+        triggerIndex: item.triggerIndex,
+        trigger: item.trigger,
+        replay: true,
+        mimicDepth: depth + 1
+      },
+      exam,
+      hooks,
+      options
+    );
+  }
+}
+
+async function repeatSourceTrigger(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const source = context.sourceTrigger;
+  if (!source || source.replay) {
+    return;
+  }
+  const chance = Number(context.trigger.params?.chance ?? 0);
+  const times = Number(context.trigger.params?.times ?? 1);
+  const bonusTimes = hasArtifact(state, "electric_gatling_pea") && context.owner.artifactId === "gatling_peashooter"
+    ? times
+    : 0;
+  if (state.rng.next() >= chance) {
+    return;
+  }
+  for (let i = 0; i < times + bonusTimes; i += 1) {
+    await executeTrigger(
+      state,
+      { ...source, replay: true },
+      exam,
+      hooks,
+      options
+    );
+  }
+}
+
+function hasArtifact(state: GameState, artifactId: string): boolean {
+  return state.artifacts.some((artifact) => artifact.artifactId === artifactId);
+}
+
+async function triggerRightOnOtherTrigger(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const source = context.sourceTrigger;
+  if (!source || state.rng.next() >= Number(context.trigger.params?.chance ?? 0)) {
+    return;
+  }
+  const index = state.artifacts.findIndex((item) => item.instanceId === context.owner.instanceId);
+  const right = state.artifacts[index + 1];
+  const config = right ? state.artifactById.get(right.artifactId) : undefined;
+  const trigger = config?.triggers
+    .map((item, triggerIndex) => ({ item, triggerIndex }))
+    .find((item) => item.item.timing === source.timing);
+  if (!right || !trigger) {
+    return;
+  }
+  await executeTrigger(
+    state,
+    {
+      timing: source.timing,
+      owner: right,
+      triggerIndex: trigger.triggerIndex,
+      trigger: trigger.item,
+      replay: true
+    },
+    exam,
+    hooks,
+    options
+  );
+}
+
+function triggerLuckyBlock(
+  state: GameState,
+  context: TriggerContext,
+  exam: ExamState | undefined
+): void {
+  if (!exam) {
+    return;
+  }
+  const baseChance = Number(context.trigger.params?.chance ?? 0.002);
+  const baseValue = Number(context.trigger.params?.value ?? 1000);
+  const chance = queryModifierValue(state, "luckyBlockChance", baseChance, { exam });
+  if (state.rng.next() >= chance) {
+    return;
+  }
+  const value = queryModifierValue(
+    state,
+    "luckyBlockValue",
+    baseValue * state.stats.luckyBlockValueMultiplier,
+    { exam }
+  );
+  exam.examPostBonus += value;
+  state.stats.luckyBlockValueMultiplier *= 2;
+  appendLog(state, `幸运方块触发: 考试后置额外分 +${value}，下次效果 x2`);
+}
+
+async function runExam(
+  state: GameState,
+  subject: SubjectId,
+  index: number,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  const exam = createExamState(state, subject, index);
+  appendLog(state, `开始考试: ${SUBJECT_LABELS[subject]}`);
+  hooks.onExamStart?.({ index, subject, startingScore: exam.rawScore });
+  await triggerEvent(state, "EXAM_START", exam, hooks, options);
+
+  for (let questionIndex = 1; questionIndex <= exam.questionCount; questionIndex += 1) {
+    await runQuestion(state, exam, questionIndex, hooks, options);
+  }
+
+  await triggerEvent(state, "EXAM_END", exam, hooks, options);
+  const score = Math.round(exam.rawScore * calculateExamMultiplier(state, exam) + exam.examPostBonus);
+  const examLog = {
+    subject,
+    score,
+    correctCount: exam.correctCount,
+    wrongCount: exam.wrongCount,
+    questions: exam.questionLogs
+  };
+  state.exams.push(examLog);
+  hooks.onExamEnd?.(examLog);
+  appendLog(state, `结束考试: ${SUBJECT_LABELS[subject]} ${score} 分`);
+}
+
+function createExamState(state: GameState, subject: SubjectId, index: number): ExamState {
+  const exam: ExamState = {
+    index,
+    subject,
+    questionCount: 15,
+    pointsPerQuestion: 10,
+    fullScore: 150,
+    questionIndex: 0,
+    rawScore: state.stats.pendingNextExamScore,
+    examMultiplier: 1,
+    correctCount: 0,
+    wrongCount: 0,
+    correctStreak: 0,
+    wrongStreak: 0,
+    previousWrongStreak: 0,
+    currentAccuracyBonus: 0,
+    currentFinalAccuracy: 0,
+    currentQuestionMultiplier: 1,
+    questionMultiplierAdds: [],
+    questionMultiplierMuls: [],
+    currentQuestionFlatScore: 0,
+    examMultiplierAdds: [],
+    examMultiplierMuls: [],
+    examPostBonus: 0,
+    questionLogs: [],
+    questionModifiers: state.nextExamQuestionModifiers
+  };
+  state.stats.pendingNextExamScore = 0;
+  state.nextExamQuestionModifiers = [];
+  return exam;
+}
+
+function applyQueuedQuestionModifiers(exam: ExamState): void {
+  for (const modifier of exam.questionModifiers) {
+    if (modifier.target === "accuracy") {
+      exam.currentAccuracyBonus += modifier.value;
+    } else if (modifier.mode === "multiply") {
+      exam.questionMultiplierMuls.push(modifier.value);
+    } else {
+      exam.questionMultiplierAdds.push(modifier.value);
+    }
+    modifier.remaining -= 1;
+  }
+  exam.questionModifiers = exam.questionModifiers.filter((modifier) => modifier.remaining > 0);
+}
+
+async function runQuestion(
+  state: GameState,
+  exam: ExamState,
+  questionIndex: number,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  exam.questionIndex = questionIndex;
+  exam.previousWrongStreak = exam.wrongStreak;
+  exam.currentAccuracyBonus = 0;
+  exam.currentQuestionMultiplier = 1;
+  exam.questionMultiplierAdds = [];
+  exam.questionMultiplierMuls = [];
+  exam.currentQuestionFlatScore = 0;
+  exam.forcedResult = undefined;
+  exam.currentResult = undefined;
+  await hooks.beforeQuestion?.({ index: exam.index, subject: exam.subject, questionIndex });
+  applyQueuedQuestionModifiers(exam);
+
+  await triggerEvent(state, "QUESTION_BEFORE_ROLL", exam, hooks, options);
+  const baseAccuracy = queryModifierValue(state, "baseAccuracy", state.stats.baseAccuracy, { exam });
+  const rawAccuracy = queryModifierValue(
+    state,
+    "finalAccuracy",
+    (baseAccuracy * state.stats.stamina) / 100 + exam.currentAccuracyBonus,
+    { exam }
+  );
+  exam.currentFinalAccuracy = rawAccuracy;
+  const accuracy = clamp(rawAccuracy, 0, 100);
+  const roll = state.rng.next() * 100;
+  exam.currentResult = roll < accuracy ? "correct" : "wrong";
+
+  await finishQuestionAfterRoll(state, exam, accuracy, roll, hooks, options);
+}
+
+async function finishQuestionAfterRoll(
+  state: GameState,
+  exam: ExamState,
+  accuracy: number,
+  roll: number,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  await triggerEvent(state, "QUESTION_AFTER_ROLL", exam, hooks, options);
+  const correct = exam.currentResult === "correct";
+  if (correct) {
+    exam.correctCount += 1;
+    exam.correctStreak += 1;
+    exam.wrongStreak = 0;
+  } else {
+    exam.wrongCount += 1;
+    exam.wrongStreak += 1;
+    exam.correctStreak = 0;
+  }
+  await scoreQuestion(state, exam, accuracy, roll, correct, hooks, options);
+}
+
+async function scoreQuestion(
+  state: GameState,
+  exam: ExamState,
+  accuracy: number,
+  roll: number,
+  correct: boolean,
+  hooks: ChoiceHooks,
+  options: GameOptions
+): Promise<void> {
+  await triggerEvent(state, "QUESTION_SCORE", exam, hooks, options);
+  const multiplier = calculateQuestionMultiplier(state, exam);
+  const scoreGained =
+    (correct ? exam.pointsPerQuestion * multiplier : 0) + exam.currentQuestionFlatScore;
+  exam.rawScore += scoreGained;
+  const staminaBefore = state.stats.stamina;
+
+  const questionLog = {
+    subject: exam.subject,
+    questionIndex: exam.questionIndex,
+    staminaBefore,
+    staminaAfter: staminaBefore,
+    accuracy: Math.round(accuracy * 100) / 100,
+    roll: Math.round(roll * 100) / 100,
+    correct,
+    scoreGained: Math.round(scoreGained * 100) / 100
+  };
+  exam.currentQuestionLog = questionLog;
+  exam.questionLogs.push(questionLog);
+
+  const staminaFloor = queryModifierValue(state, "staminaFloor", state.stats.staminaFloor, { exam });
+  const staminaDecay = queryModifierValue(state, "staminaDecay", state.stats.staminaDecay, { exam });
+  state.stats.stamina = Math.max(staminaFloor, state.stats.stamina - staminaDecay);
+  await triggerEvent(state, "QUESTION_END", exam, hooks, options);
+  questionLog.staminaAfter = Math.round(state.stats.stamina * 100) / 100;
+  appendLog(state, describeQuestionState(exam, questionLog, multiplier));
+  hooks.onQuestion?.(questionLog, {
+    index: exam.index,
+    subject: exam.subject,
+    rawScore: Math.round(exam.rawScore * 100) / 100
+  });
+  exam.lastResult = exam.currentResult;
+}
+
+function describeQuestionState(
+  exam: ExamState,
+  question: ExamLog["questions"][number],
+  multiplier: number
+): string {
+  return (
+    `${SUBJECT_LABELS[exam.subject]} Q${question.questionIndex}: ${question.correct ? "正确" : "错误"} | ` +
+    `正确率 ${question.accuracy}% | 掷骰 ${question.roll} | ` +
+    `体力 ${question.staminaBefore}->${question.staminaAfter} | ` +
+    `本题倍率 x${Math.round(multiplier * 100) / 100} | ` +
+    `本题得分 ${question.scoreGained} | 本场累计 ${Math.round(exam.rawScore)} | ` +
+    `连对 ${exam.correctStreak} / 连错 ${exam.wrongStreak}`
+  );
+}
+
+function calculateQuestionMultiplier(state: GameState, exam: ExamState): number {
+  const base = queryModifierValue(state, "questionMultiplier", state.stats.questionMultiplierBase, {
+    exam
+  });
+  const added = base + exam.questionMultiplierAdds.reduce((sum, value) => sum + value, 0);
+  const multiplied = exam.questionMultiplierMuls.reduce((value, factor) => value * factor, added);
+  return Math.max(0, Math.round(multiplied * 10000) / 10000);
+}
+
+function calculateExamMultiplier(state: GameState, exam: ExamState): number {
+  const base = queryModifierValue(state, "examMultiplier", exam.examMultiplier, { exam });
+  const added = base + exam.examMultiplierAdds.reduce((sum, value) => sum + value, 0);
+  const multiplied = exam.examMultiplierMuls.reduce((value, factor) => value * factor, added);
+  return Math.max(0, Math.round(multiplied * 10000) / 10000);
+}
+
+function calculateRunMultiplier(state: GameState): number {
+  const base = queryModifierValue(state, "runMultiplier", state.stats.runMultiplier);
+  const added = base + state.stats.runMultiplierAdds.reduce((sum, value) => sum + value, 0);
+  const multiplied = state.stats.runMultiplierMuls.reduce((value, factor) => value * factor, added);
+  return Math.max(0, Math.round(multiplied * 10000) / 10000);
+}
