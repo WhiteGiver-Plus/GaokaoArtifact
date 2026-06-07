@@ -38,9 +38,18 @@ export async function applyEffect(
     case "multiplyQuestionMultiplierByStreak":
       multiplyQuestionMultiplierByStreak(effect, requireExam(effect.op, exam));
       return;
+    case "addQuestionBaseScore":
+      requireExam(effect.op, exam).currentQuestionBaseScore += effect.value;
+      return;
     case "addQuestionScore":
       requireExam(effect.op, exam).currentQuestionFlatScore += effect.value;
       return;
+    case "addExamPostBonusByQuestionTriggerCount": {
+      const currentExam = requireExam(effect.op, exam);
+      const bonus = Math.min(effect.cap, Math.pow(effect.base, currentExam.currentQuestionTriggerCount));
+      currentExam.examPostBonus += bonus;
+      return;
+    }
     case "convertAccuracyOverflowToQuestionMultiplier": {
       const currentExam = requireExam(effect.op, exam);
       currentExam.questionMultiplierAdds.push(Math.max(0, currentExam.currentFinalAccuracy - 100) / 100);

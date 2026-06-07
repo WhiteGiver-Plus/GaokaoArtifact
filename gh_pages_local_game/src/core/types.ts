@@ -24,6 +24,21 @@ export type SubjectId =
   | (typeof REQUIRED_SUBJECTS)[number]
   | (typeof ELECTIVE_SUBJECTS)[number];
 
+export const SUBJECT_EXAM_RULES: Record<
+  SubjectId,
+  { questionCount: number; pointsPerQuestion: number; fullScore: number }
+> = {
+  chinese: { questionCount: 15, pointsPerQuestion: 10, fullScore: 150 },
+  math: { questionCount: 15, pointsPerQuestion: 10, fullScore: 150 },
+  english: { questionCount: 15, pointsPerQuestion: 10, fullScore: 150 },
+  physics: { questionCount: 10, pointsPerQuestion: 10, fullScore: 100 },
+  chemistry: { questionCount: 10, pointsPerQuestion: 10, fullScore: 100 },
+  biology: { questionCount: 10, pointsPerQuestion: 10, fullScore: 100 },
+  politics: { questionCount: 10, pointsPerQuestion: 10, fullScore: 100 },
+  history: { questionCount: 10, pointsPerQuestion: 10, fullScore: 100 },
+  geography: { questionCount: 10, pointsPerQuestion: 10, fullScore: 100 }
+};
+
 export type Rarity = "common" | "uncommon" | "rare" | "special";
 
 export type Timing =
@@ -47,6 +62,7 @@ export type ConditionConfig =
   | { kind: "subject"; subjects: SubjectId[] }
   | { kind: "questionIndex"; op: CompareOp; value: number }
   | { kind: "questionIndexIn"; values: number[] }
+  | { kind: "lastQuestion" }
   | { kind: "questionModulo"; modulo: number; equals: number }
   | { kind: "result"; value: "correct" | "wrong" }
   | { kind: "lastResult"; value: "correct" | "wrong" }
@@ -98,10 +114,12 @@ export type EffectConfig =
       base: number;
       usePrevious?: boolean;
     }
+  | { op: "addQuestionBaseScore"; value: number }
   | { op: "addExamMultiplier"; value: number }
   | { op: "multiplyExamMultiplier"; value: number }
   | { op: "adjustCurrentTotalScore"; mode: "add" | "multiply"; value: number }
   | { op: "addQuestionScore"; value: number }
+  | { op: "addExamPostBonusByQuestionTriggerCount"; base: number; cap: number }
   | { op: "convertAccuracyOverflowToQuestionMultiplier" }
   | { op: "addExamScore"; value: number }
   | { op: "addExamPostBonus"; value: number }
@@ -196,6 +214,9 @@ export interface QuestionLog {
 
 export interface ExamLog {
   subject: SubjectId;
+  rawScore: number;
+  examMultiplier: number;
+  examPostBonus: number;
   score: number;
   correctCount: number;
   wrongCount: number;
@@ -291,7 +312,7 @@ export interface ChoiceHooks {
       status: LiveExamStatus;
     }
   ) => void;
-  onExamEnd?: (exam: ExamLog) => void;
+  onExamEnd?: (exam: ExamLog) => Promise<void> | void;
   onRunEnd?: (result: RunResult) => void;
 }
 
@@ -340,7 +361,9 @@ export interface ExamState {
   currentQuestionMultiplier: number;
   questionMultiplierAdds: number[];
   questionMultiplierMuls: number[];
+  currentQuestionBaseScore: number;
   currentQuestionFlatScore: number;
+  currentQuestionTriggerCount: number;
   examMultiplierAdds: number[];
   examMultiplierMuls: number[];
   examPostBonus: number;

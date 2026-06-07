@@ -32,6 +32,8 @@ export function evaluateCondition(
       return Boolean(exam && compare(exam.questionIndex, condition.op, condition.value));
     case "questionIndexIn":
       return Boolean(exam && condition.values.includes(exam.questionIndex));
+    case "lastQuestion":
+      return Boolean(exam && exam.questionIndex === exam.questionCount);
     case "questionModulo":
       return Boolean(exam && exam.questionIndex % condition.modulo === condition.equals);
     case "result":

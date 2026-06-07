@@ -15,7 +15,7 @@ import type {
   Timing,
   TriggerContext
 } from "./types.js";
-import { ELECTIVE_SUBJECTS, REQUIRED_SUBJECTS, SUBJECT_LABELS } from "./types.js";
+import { ELECTIVE_SUBJECTS, REQUIRED_SUBJECTS, SUBJECT_EXAM_RULES, SUBJECT_LABELS } from "./types.js";
 import { defaultSeed } from "./rng.js";
 import { appendLog, createGameState, createOwnedArtifact, type GameState } from "./state.js";
 import { evaluateCondition } from "./conditions.js";
@@ -170,7 +170,56 @@ function createDraftChoices(state: GameState, count: number): ArtifactConfig[] {
     const ownedCount = state.artifacts.filter((owned) => owned.artifactId === artifact.id).length;
     return ownedCount < (artifact.maxCopies ?? 1);
   });
-  return state.rng.shuffle(available).slice(0, count);
+  return weightedSampleDraftChoices(state, available, count);
+}
+
+function weightedSampleDraftChoices(
+  state: GameState,
+  available: ArtifactConfig[],
+  count: number
+): ArtifactConfig[] {
+  const pool = [...available];
+  const choices: ArtifactConfig[] = [];
+  const tagCounts = countOwnedTags(state);
+  while (pool.length > 0 && choices.length < count) {
+    const index = pickWeightedArtifactIndex(state, pool, tagCounts);
+    const [choice] = pool.splice(index, 1);
+    choices.push(choice);
+  }
+  return choices;
+}
+
+function pickWeightedArtifactIndex(
+  state: GameState,
+  artifacts: ArtifactConfig[],
+  tagCounts: Map<string, number>
+): number {
+  const weights = artifacts.map((artifact) => draftWeightForArtifact(artifact, tagCounts));
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  let roll = state.rng.next() * total;
+  for (let index = 0; index < weights.length; index += 1) {
+    roll -= weights[index];
+    if (roll <= 0) {
+      return index;
+    }
+  }
+  return artifacts.length - 1;
+}
+
+function draftWeightForArtifact(artifact: ArtifactConfig, tagCounts: Map<string, number>): number {
+  const matchingOwnedTags = artifact.tags.reduce((sum, tag) => sum + (tagCounts.get(tag) ?? 0), 0);
+  return 1 + matchingOwnedTags * 0.08;
+}
+
+function countOwnedTags(state: GameState): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const owned of state.artifacts) {
+    const config = state.artifactById.get(owned.artifactId);
+    for (const tag of config?.tags ?? []) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return counts;
 }
 
 async function chooseArtifactIndex(
@@ -384,6 +433,9 @@ async function executeTrigger(
   }
 
   state.currentEventCount += 1;
+  if (exam && exam.questionIndex > 0 && countsForCurrentQuestion(context.timing)) {
+    exam.currentQuestionTriggerCount += 1;
+  }
   const config = state.artifactById.get(context.owner.artifactId);
   const before = captureLiveExamStatus(state, exam);
   const scoreBefore = captureLiveScoreStatus(state, exam);
@@ -411,6 +463,9 @@ async function executeTrigger(
   }
   if (!handlerTriggered) {
     state.currentEventCount -= 1;
+    if (exam && exam.questionIndex > 0 && countsForCurrentQuestion(context.timing)) {
+      exam.currentQuestionTriggerCount = Math.max(0, exam.currentQuestionTriggerCount - 1);
+    }
     rollbackTriggerLimit(state, context, exam);
     return false;
   }
@@ -464,8 +519,12 @@ function describeEffect(effect: EffectConfig): string {
       return `本题倍率 x${effect.value}`;
     case "multiplyQuestionMultiplierByStreak":
       return `按${effect.streak === "correct" ? "连对" : "连错"}倍率 x${effect.base}`;
+    case "addQuestionBaseScore":
+      return `本题基础分 ${formatSigned(effect.value)}`;
     case "addQuestionScore":
       return `本题额外分 ${formatSigned(effect.value)}`;
+    case "addExamPostBonusByQuestionTriggerCount":
+      return `按本题触发次数增加最终分，上限 ${effect.cap}`;
     case "convertAccuracyOverflowToQuestionMultiplier":
       return "超出 100% 正确率转为本题倍率";
     case "addExamMultiplier":
@@ -505,6 +564,10 @@ function describeEffect(effect: EffectConfig): string {
     case "log":
       return effect.message;
   }
+}
+
+function countsForCurrentQuestion(timing: Timing): boolean {
+  return timing.startsWith("QUESTION_") || timing === "OTHER_ARTIFACT_TRIGGERED";
 }
 
 function statLabel(stat: Extract<EffectConfig, { op: "addStat" }>["stat"] | "staminaFloor"): string {
@@ -868,26 +931,33 @@ async function runExam(
   }
 
   await triggerEvent(state, "EXAM_END", exam, hooks, options);
-  const score = Math.round(exam.rawScore * calculateExamMultiplier(state, exam) + exam.examPostBonus);
+  const rawScore = Math.round(exam.rawScore * 100) / 100;
+  const examMultiplier = calculateExamMultiplier(state, exam);
+  const examPostBonus = Math.round(exam.examPostBonus * 100) / 100;
+  const score = Math.round(rawScore * examMultiplier + examPostBonus);
   const examLog = {
     subject,
+    rawScore,
+    examMultiplier,
+    examPostBonus,
     score,
     correctCount: exam.correctCount,
     wrongCount: exam.wrongCount,
     questions: exam.questionLogs
   };
   state.exams.push(examLog);
-  hooks.onExamEnd?.(examLog);
+  await hooks.onExamEnd?.(examLog);
   appendLog(state, `结束考试: ${SUBJECT_LABELS[subject]} ${score} 分`);
 }
 
 function createExamState(state: GameState, subject: SubjectId, index: number): ExamState {
+  const rule = SUBJECT_EXAM_RULES[subject];
   const exam: ExamState = {
     index,
     subject,
-    questionCount: 15,
-    pointsPerQuestion: 10,
-    fullScore: 150,
+    questionCount: rule.questionCount,
+    pointsPerQuestion: rule.pointsPerQuestion,
+    fullScore: rule.fullScore,
     questionIndex: 0,
     rawScore: state.stats.pendingNextExamScore,
     examMultiplier: 1,
@@ -901,7 +971,9 @@ function createExamState(state: GameState, subject: SubjectId, index: number): E
     currentQuestionMultiplier: 1,
     questionMultiplierAdds: [],
     questionMultiplierMuls: [],
+    currentQuestionBaseScore: 0,
     currentQuestionFlatScore: 0,
+    currentQuestionTriggerCount: 0,
     examMultiplierAdds: [],
     examMultiplierMuls: [],
     examPostBonus: 0,
@@ -940,7 +1012,9 @@ async function runQuestion(
   exam.currentQuestionMultiplier = 1;
   exam.questionMultiplierAdds = [];
   exam.questionMultiplierMuls = [];
+  exam.currentQuestionBaseScore = 0;
   exam.currentQuestionFlatScore = 0;
+  exam.currentQuestionTriggerCount = 0;
   exam.forcedResult = undefined;
   exam.currentResult = undefined;
   await hooks.beforeQuestion?.({
@@ -1001,7 +1075,8 @@ async function scoreQuestion(
   await triggerEvent(state, "QUESTION_SCORE", exam, hooks, options);
   const multiplier = calculateQuestionMultiplier(state, exam);
   const scoreGained =
-    (correct ? exam.pointsPerQuestion * multiplier : 0) + exam.currentQuestionFlatScore;
+    ((correct ? exam.pointsPerQuestion : 0) + exam.currentQuestionBaseScore) * multiplier +
+    exam.currentQuestionFlatScore;
   exam.rawScore += scoreGained;
   const staminaBefore = state.stats.stamina;
 

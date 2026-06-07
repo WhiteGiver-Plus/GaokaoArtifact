@@ -6,8 +6,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "大保底",
     "rarity": "rare",
     "tags": [
-      "accuracy",
-      "position"
+      "高正确率",
+      "压轴题"
     ],
     "description": "每场考试最后一题，正确率 +1000%。",
     "modifiers": [],
@@ -15,9 +15,7 @@ export const LOCAL_ARTIFACTS = [
       {
         "timing": "QUESTION_BEFORE_ROLL",
         "condition": {
-          "kind": "questionIndex",
-          "op": "eq",
-          "value": 15
+          "kind": "lastQuestion"
         },
         "effects": [
           {
@@ -35,8 +33,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "小保底",
     "rarity": "uncommon",
     "tags": [
-      "accuracy",
-      "position"
+      "高正确率",
+      "节奏题"
     ],
     "description": "每场考试每 5 道题，正确率 +200%。",
     "modifiers": [],
@@ -64,8 +62,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "空城",
     "rarity": "rare",
     "tags": [
-      "wrong",
-      "exam_score"
+      "低正确率",
+      "错题",
+      "分数补偿"
     ],
     "description": "若本场考试所有题目全部答错，则考试原始分至少补到满分。",
     "modifiers": [],
@@ -90,8 +89,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "自刎归天",
     "rarity": "special",
     "tags": [
-      "wrong",
-      "risk"
+      "低正确率",
+      "错题",
+      "风险收益"
     ],
     "description": "本场考试每题正确率 -100%。",
     "modifiers": [],
@@ -114,8 +114,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "胜兵必骄，骄兵必败",
     "rarity": "uncommon",
     "tags": [
-      "streak",
-      "risk"
+      "连胜",
+      "风险收益"
     ],
     "description": "若本题答对，则后续 2 题正确率 -100%。",
     "modifiers": [],
@@ -144,8 +144,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "败兵必哀，哀兵必胜",
     "rarity": "uncommon",
     "tags": [
-      "streak",
-      "comeback"
+      "连败",
+      "错题",
+      "翻盘"
     ],
     "description": "若本题答错，则后续 2 题正确率 +100%。",
     "modifiers": [],
@@ -174,8 +175,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "羊刀",
     "rarity": "rare",
     "tags": [
-      "streak",
-      "multiplier"
+      "连胜",
+      "倍率成长"
     ],
     "description": "每题得分倍率按当前连对数连续 x1.1。",
     "modifiers": [],
@@ -203,8 +204,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "医死的人越多，医术越高明",
     "rarity": "rare",
     "tags": [
-      "wrong",
-      "multiplier"
+      "连败",
+      "错题",
+      "倍率成长"
     ],
     "description": "按上一段连续答错数，使本题得分倍率连续 x1.2。",
     "modifiers": [],
@@ -229,8 +231,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "复活甲",
     "rarity": "rare",
     "tags": [
-      "safety",
-      "force_result"
+      "高正确率",
+      "容错"
     ],
     "description": "每场考试第一次答错时，强制将本题结果改为正确。",
     "modifiers": [],
@@ -261,8 +263,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "对的对的，哦不对不对",
     "rarity": "uncommon",
     "tags": [
-      "risk",
-      "force_result"
+      "低正确率",
+      "风险收益"
     ],
     "description": "每场考试第一次答对时，强制将本题结果改为错误。",
     "modifiers": [],
@@ -293,8 +295,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "至终的仪式",
     "rarity": "rare",
     "tags": [
-      "streak",
-      "total_score"
+      "连胜",
+      "总分成长"
     ],
     "description": "每连续答对五题时，当前总分 x1.1。",
     "modifiers": [],
@@ -324,8 +326,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "第五人格",
     "rarity": "rare",
     "tags": [
-      "wrong",
-      "exam_multiplier"
+      "连败",
+      "错题",
+      "考试倍率"
     ],
     "description": "每连续答错 5 题时，本场考试倍率 x1.2。",
     "modifiers": [],
@@ -354,7 +357,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "多选题",
     "rarity": "uncommon",
     "tags": [
-      "draft"
+      "遗物流",
+      "抽取"
     ],
     "description": "每次抽取遗物时，备选数 +1。",
     "modifiers": [
@@ -373,8 +377,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "无中生有",
     "rarity": "rare",
     "tags": [
-      "draft",
-      "consume"
+      "遗物流",
+      "抽取",
+      "消耗"
     ],
     "description": "随机获得 2 件遗物，然后销毁自身。",
     "modifiers": [],
@@ -400,8 +405,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "上线立送10连抽",
     "rarity": "rare",
     "tags": [
-      "draft",
-      "consume"
+      "遗物流",
+      "抽取",
+      "消耗"
     ],
     "description": "立刻进行一次 10 选 1 遗物抽取。",
     "modifiers": [],
@@ -425,8 +431,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "我们可以改变一切",
     "rarity": "rare",
     "tags": [
-      "destroy",
-      "exam_score"
+      "遗物流",
+      "销毁",
+      "分数补偿"
     ],
     "description": "销毁最左侧其他遗物；下场考试初始分 +200。",
     "modifiers": [],
@@ -453,8 +460,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "白银狮子",
     "rarity": "uncommon",
     "tags": [
-      "lost",
-      "exam_score"
+      "遗物流",
+      "销毁",
+      "分数补偿"
     ],
     "description": "失去这件遗物时，下场考试初始分 +100。",
     "modifiers": [],
@@ -480,9 +488,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "玻璃大炮",
     "rarity": "rare",
     "tags": [
-      "risk",
-      "multiplier",
-      "stamina"
+      "体力",
+      "倍率成长",
+      "风险收益"
     ],
     "description": "体力下降 +10；每题得分倍率 +1。",
     "modifiers": [
@@ -506,7 +514,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "再生药水",
     "rarity": "common",
     "tags": [
-      "stamina"
+      "体力",
+      "续航"
     ],
     "description": "每场考试每 5 道题结束时，体力 +20。",
     "modifiers": [],
@@ -535,7 +544,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "体力药水",
     "rarity": "common",
     "tags": [
-      "stamina"
+      "体力",
+      "续航"
     ],
     "description": "每场考试开始时，体力 +50。",
     "modifiers": [],
@@ -559,8 +569,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "幸运方块",
     "rarity": "rare",
     "tags": [
-      "random",
-      "exam_score"
+      "幸运方块",
+      "随机爆发",
+      "分数补偿"
     ],
     "description": "每题结算后有 0.2% 概率触发，本场考试最终得分增加 1000；每次触发后，下次幸运方块增加值 x2。",
     "modifiers": [],
@@ -582,7 +593,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "强运",
     "rarity": "uncommon",
     "tags": [
-      "accuracy"
+      "高正确率"
     ],
     "description": "基础正确率 x125%。",
     "modifiers": [
@@ -601,8 +612,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "名刀·司命",
     "rarity": "rare",
     "tags": [
-      "stamina",
-      "safety"
+      "体力",
+      "容错"
     ],
     "description": "你的体力下限被锁定为不可低于 10%。",
     "modifiers": [
@@ -621,9 +632,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "轮回之终末",
     "rarity": "special",
     "tags": [
-      "accuracy",
-      "stamina",
-      "risk"
+      "高正确率",
+      "体力",
+      "风险收益"
     ],
     "description": "最终正确率 +1000%，每场考试开始时体力 +1000；每场考试结束时，考试原始分 -1000。",
     "modifiers": [
@@ -662,7 +673,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "尤里卡",
     "rarity": "common",
     "tags": [
-      "accuracy"
+      "高正确率"
     ],
     "description": "基础正确率 x120%。",
     "modifiers": [
@@ -681,8 +692,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "豆包",
     "rarity": "uncommon",
     "tags": [
-      "accuracy",
-      "force_result"
+      "低正确率",
+      "风险收益"
     ],
     "description": "基础正确率 x20%。",
     "modifiers": [
@@ -701,8 +712,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "深度思考中",
     "rarity": "uncommon",
     "tags": [
-      "accuracy",
-      "stamina"
+      "高正确率",
+      "体力"
     ],
     "description": "基础正确率 x140%，每题体力下降 +5。",
     "modifiers": [
@@ -726,8 +737,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "连坐制",
     "rarity": "uncommon",
     "tags": [
-      "position",
-      "multiplier"
+      "连胜",
+      "节奏题",
+      "倍率成长"
     ],
     "description": "若本题答对，则下一题得分倍率 +1.5。",
     "modifiers": [],
@@ -756,8 +768,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "观星",
     "rarity": "common",
     "tags": [
-      "position",
-      "accuracy"
+      "高正确率",
+      "前期题"
     ],
     "description": "每场考试前 2 题，正确率 +100%。",
     "modifiers": [],
@@ -785,8 +797,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "沉底石头人",
     "rarity": "uncommon",
     "tags": [
-      "position",
-      "multiplier"
+      "前期题",
+      "倍率成长",
+      "风险收益"
     ],
     "description": "每场考试前 8 题，得分倍率 -0.8；第 9 题起，得分倍率 +0.8。",
     "modifiers": [],
@@ -828,8 +841,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "模仿者",
     "rarity": "rare",
     "tags": [
-      "slot",
-      "copy"
+      "遗物流",
+      "联动"
     ],
     "description": "模仿右侧第一张遗物。",
     "modifiers": [],
@@ -871,8 +884,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "双发射手",
     "rarity": "rare",
     "tags": [
-      "slot",
-      "repeat"
+      "遗物流",
+      "联动",
+      "豌豆"
     ],
     "description": "每次其他遗物触发时，20% 概率多触发一次。",
     "modifiers": [],
@@ -894,8 +908,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "机枪射手",
     "rarity": "rare",
     "tags": [
-      "slot",
-      "repeat"
+      "遗物流",
+      "联动",
+      "豌豆"
     ],
     "description": "每次其他遗物触发时，20% 概率多触发三次。",
     "modifiers": [],
@@ -917,8 +932,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "瓷砖萝卜",
     "rarity": "rare",
     "tags": [
-      "slot",
-      "repeat"
+      "遗物流",
+      "联动",
+      "豌豆"
     ],
     "description": "每次其他遗物触发时，20% 概率触发其右侧的第一个遗物。",
     "modifiers": [],
@@ -939,8 +955,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "电能机枪豌豆",
     "rarity": "special",
     "tags": [
-      "slot",
-      "combo"
+      "遗物流",
+      "联动",
+      "豌豆"
     ],
     "description": "若你有机枪射手，机枪射手效果翻倍。",
     "modifiers": [],
@@ -953,7 +970,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "上海卷高考作文",
     "rarity": "common",
     "tags": [
-      "blank"
+      "无效遗物"
     ],
     "description": "有人说，这个遗物没有任何效果，也有人认为不尽如此，你怎么看？无任何效果。",
     "modifiers": [],
@@ -966,7 +983,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "说的道理",
     "rarity": "common",
     "tags": [
-      "blank"
+      "无效遗物"
     ],
     "description": "说的道理。无任何效果。",
     "modifiers": [],
@@ -979,8 +996,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "欢乐小丑",
     "rarity": "uncommon",
     "tags": [
-      "score_pattern",
-      "exam_multiplier"
+      "分数形态",
+      "考试倍率"
     ],
     "description": "每科考试结束时，若结算前考试原始分包含至少 2 个相同数字，则本场考试倍率 +2。",
     "modifiers": [],
@@ -1007,8 +1024,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "滑稽小丑",
     "rarity": "rare",
     "tags": [
-      "score_pattern",
-      "exam_multiplier"
+      "分数形态",
+      "考试倍率"
     ],
     "description": "每科考试结束时，若结算前考试原始分包含至少 3 个相同数字，则本场考试倍率 +10。",
     "modifiers": [],
@@ -1035,8 +1052,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "狂小丑",
     "rarity": "rare",
     "tags": [
-      "score_pattern",
-      "exam_multiplier"
+      "分数形态",
+      "考试倍率"
     ],
     "description": "每科考试结束时，若结算前考试原始分为连续数字，则本场考试倍率 +20。",
     "modifiers": [],
@@ -1062,8 +1079,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "宇宙立方",
     "rarity": "uncommon",
     "tags": [
-      "score_pattern",
-      "exam_score"
+      "分数形态",
+      "分数补偿"
     ],
     "description": "每科考试结束时，若结算前考试原始分为立方数，则本场考试最终得分增加 200。",
     "modifiers": [],
@@ -1089,8 +1106,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "唉，二次元",
     "rarity": "common",
     "tags": [
-      "score_pattern",
-      "exam_score"
+      "分数形态",
+      "分数补偿"
     ],
     "description": "每科考试结束时，若结算前考试原始分为平方数，则本场考试最终得分增加 50。",
     "modifiers": [],
@@ -1116,7 +1133,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "押题",
     "rarity": "rare",
     "tags": [
-      "accuracy"
+      "高正确率"
     ],
     "description": "最终正确率 x1.5。",
     "modifiers": [
@@ -1135,8 +1152,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "圣水采集器",
     "rarity": "rare",
     "tags": [
-      "accuracy",
-      "multiplier"
+      "高正确率",
+      "倍率成长"
     ],
     "description": "超出 100% 的当前正确率转换为题目得分倍率加成。",
     "modifiers": [],
@@ -1163,8 +1180,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "超凡入圣",
     "rarity": "rare",
     "tags": [
-      "accuracy",
-      "multiplier"
+      "高正确率",
+      "倍率成长"
     ],
     "description": "若当前正确率超过 200%，本题得分倍率 x4。",
     "modifiers": [],
@@ -1192,9 +1209,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "快乐小花",
     "rarity": "uncommon",
     "tags": [
-      "accuracy",
-      "position",
-      "multiplier"
+      "高正确率",
+      "节奏题",
+      "倍率成长"
     ],
     "description": "每场考试每 3 道题，正确率 x1.5，得分倍率 x2。",
     "modifiers": [
@@ -1233,9 +1250,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "钢笔尖",
     "rarity": "rare",
     "tags": [
-      "accuracy",
-      "position",
-      "multiplier"
+      "高正确率",
+      "节奏题",
+      "倍率成长"
     ],
     "description": "每场考试每 10 道题，正确率 x2，得分倍率 x5。",
     "modifiers": [
@@ -1274,8 +1291,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "精力充沛",
     "rarity": "uncommon",
     "tags": [
-      "stamina",
-      "multiplier"
+      "体力",
+      "倍率成长"
     ],
     "description": "体力高于 100% 时，题目得分倍率 x1.5。",
     "modifiers": [],
@@ -1303,8 +1320,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "红骷髅",
     "rarity": "uncommon",
     "tags": [
-      "stamina",
-      "accuracy"
+      "体力",
+      "高正确率",
+      "翻盘"
     ],
     "description": "体力低于 50% 时，最终正确率 x1.5。",
     "modifiers": [
@@ -1328,7 +1346,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "数学爱好者",
     "rarity": "rare",
     "tags": [
-      "score_pattern"
+      "分数形态",
+      "操作分数"
     ],
     "description": "考试结束时，交换考试原始分的任意两位数字。",
     "modifiers": [],
@@ -1352,7 +1371,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "C语言大佬",
     "rarity": "rare",
     "tags": [
-      "score_pattern"
+      "分数形态",
+      "操作分数"
     ],
     "description": "考试结束时，将考试原始分个位改为 0-9 中任意数字。",
     "modifiers": [],
@@ -1376,8 +1396,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "回文数",
     "rarity": "rare",
     "tags": [
-      "score_pattern",
-      "exam_multiplier"
+      "分数形态",
+      "考试倍率"
     ],
     "description": "每科考试结束时，若结算前考试原始分为回文数，则本场考试倍率 +10。",
     "modifiers": [],
@@ -1404,8 +1424,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "前功尽弃",
     "rarity": "uncommon",
     "tags": [
-      "alternate",
-      "exam_multiplier"
+      "胜败交替",
+      "考试倍率"
     ],
     "description": "若前一题答对且本题答错，则本场考试倍率 x1.2。",
     "modifiers": [],
@@ -1441,8 +1461,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "知错能改",
     "rarity": "uncommon",
     "tags": [
-      "alternate",
-      "exam_multiplier"
+      "胜败交替",
+      "考试倍率"
     ],
     "description": "若前一题答错且本题答对，则本场考试倍率 x1.2。",
     "modifiers": [],
@@ -1478,8 +1498,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "压轴题战神",
     "rarity": "rare",
     "tags": [
-      "position",
-      "multiplier"
+      "压轴题",
+      "倍率成长"
     ],
     "description": "每场考试最后一题，该题得分倍率 x10。",
     "modifiers": [],
@@ -1487,9 +1507,7 @@ export const LOCAL_ARTIFACTS = [
       {
         "timing": "QUESTION_SCORE",
         "condition": {
-          "kind": "questionIndex",
-          "op": "eq",
-          "value": 15
+          "kind": "lastQuestion"
         },
         "effects": [
           {
@@ -1507,9 +1525,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "心外无物",
     "rarity": "special",
     "tags": [
-      "artifact",
-      "destroy",
-      "current_total"
+      "遗物流",
+      "销毁",
+      "总分成长"
     ],
     "description": "获得时，弃掉其余所有遗物；每因此弃掉 1 件，当前总分 x1.4。",
     "modifiers": [],
@@ -1532,9 +1550,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "轻装上阵",
     "rarity": "rare",
     "tags": [
-      "artifact",
-      "capacity",
-      "current_total"
+      "遗物流",
+      "容量",
+      "总分成长"
     ],
     "description": "遗物上限永久 -1；获得时，当前总分 x1.5。",
     "modifiers": [
@@ -1564,7 +1582,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "小丑牌",
     "rarity": "common",
     "tags": [
-      "blank"
+      "无效遗物"
     ],
     "description": "仅仅是这张牌很小丑。无任何效果。",
     "modifiers": [],
@@ -1577,7 +1595,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "百日誓师",
     "rarity": "common",
     "tags": [
-      "blank"
+      "无效遗物"
     ],
     "description": "无任何效果。",
     "modifiers": [],
@@ -1590,8 +1608,8 @@ export const LOCAL_ARTIFACTS = [
     "name": "废话文学大师",
     "rarity": "rare",
     "tags": [
-      "blank",
-      "exam_score"
+      "无效遗物",
+      "分数补偿"
     ],
     "description": "每科考试结束时，按无效遗物数量使本场考试最终得分增加：1/2/3/4+ 件对应 20/100/1000/5000。",
     "modifiers": [],
@@ -1600,7 +1618,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "blank",
+          "tag": "无效遗物",
           "op": "eq",
           "value": 1
         },
@@ -1615,7 +1633,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "blank",
+          "tag": "无效遗物",
           "op": "eq",
           "value": 2
         },
@@ -1630,7 +1648,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "blank",
+          "tag": "无效遗物",
           "op": "eq",
           "value": 3
         },
@@ -1645,7 +1663,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "blank",
+          "tag": "无效遗物",
           "op": "gte",
           "value": 4
         },
@@ -1665,7 +1683,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "幸运星",
     "rarity": "rare",
     "tags": [
-      "lucky_block"
+      "幸运方块"
     ],
     "description": "幸运方块触发概率 x8。",
     "modifiers": [
@@ -1684,7 +1702,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "幸运币",
     "rarity": "rare",
     "tags": [
-      "lucky_block"
+      "幸运方块"
     ],
     "description": "幸运方块触发概率 x8。",
     "modifiers": [
@@ -1695,6 +1713,63 @@ export const LOCAL_ARTIFACTS = [
       }
     ],
     "triggers": [],
+    "maxCopies": 1,
+    "draftable": true
+  },
+  {
+    "id": "process_points",
+    "name": "过程分",
+    "rarity": "common",
+    "tags": [
+      "错题",
+      "分数补偿",
+      "低正确率"
+    ],
+    "description": "答错的题目也能获得 1 分，该分数受本题得分倍率加成。",
+    "modifiers": [],
+    "triggers": [
+      {
+        "timing": "QUESTION_SCORE",
+        "condition": {
+          "kind": "result",
+          "value": "wrong"
+        },
+        "effects": [
+          {
+            "op": "addQuestionBaseScore",
+            "value": 1
+          }
+        ]
+      }
+    ],
+    "maxCopies": 1,
+    "draftable": true
+  },
+  {
+    "id": "chain_is_method",
+    "name": "能连起来就是招",
+    "rarity": "rare",
+    "tags": [
+      "遗物流",
+      "联动",
+      "分数补偿"
+    ],
+    "description": "每题结算时，考试最终分数增加 2 的本题触发遗物次数次方分，上限 128。",
+    "modifiers": [],
+    "triggers": [
+      {
+        "timing": "QUESTION_END",
+        "effects": [
+          {
+            "op": "addExamPostBonusByQuestionTriggerCount",
+            "base": 2,
+            "cap": 128
+          }
+        ],
+        "phase": 5901,
+        "order": 900
+      }
+    ],
     "maxCopies": 1,
     "draftable": true
   }

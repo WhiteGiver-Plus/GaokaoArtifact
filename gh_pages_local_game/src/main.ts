@@ -3,6 +3,7 @@ import {
   ELECTIVE_SUBJECTS,
   REQUIRED_SUBJECTS,
   runGame,
+  SUBJECT_EXAM_RULES,
   SUBJECT_LABELS,
   type ArtifactConfig,
   type ChoiceHooks,
@@ -16,10 +17,13 @@ import {
 
 const root = requireElement("root");
 const DEBUG_ROUTE = isDebugRoute();
+const SPEED_MULTIPLIERS = [1, 2, 4, 8] as const satisfies readonly SpeedMultiplier[];
+const BASE_SPEED_MS = 920;
 
 type Phase = "start" | "loading" | "draft" | "exam" | "result";
 type EventTone = "score" | "term" | "chain" | "fail" | "idle";
 type EffectIntensity = "low" | "medium" | "high" | "jackpot";
+type SpeedMultiplier = 1 | 2 | 4 | 8;
 type VisualEventKind =
   | "score:add"
   | "score:fail"
@@ -100,6 +104,7 @@ interface UiState {
   visualEvents: VisualEvent[];
   triggerQueue: VisualEvent[];
   activeTrigger?: VisualEvent;
+  examSettlement?: ExamLog;
   liveStatus: LiveExamStatus;
   chainCount: number;
   scoreFlash?: VisualEvent;
@@ -116,7 +121,9 @@ interface UiState {
   endlessYear: number;
   scoreThreshold: number;
   autoPlay: boolean;
+  speedMultiplier: SpeedMultiplier;
   speedMs: number;
+  sprintExamIndex?: number;
   debugArtifactIds: string[];
   debugSearch: string;
   footerNotice?: string;
@@ -150,7 +157,8 @@ const state: UiState = {
   endlessYear: 1,
   scoreThreshold: 750,
   autoPlay: true,
-  speedMs: 920,
+  speedMultiplier: 1,
+  speedMs: speedDelayMs(1),
   debugArtifactIds: DEBUG_ROUTE ? readDebugArtifactIds() : [],
   debugSearch: "",
   footerOpen: false
@@ -162,6 +170,7 @@ root.addEventListener("click", (event) => {
   const scoreChoice = target.closest<HTMLElement>("[data-score-choice]")?.dataset.scoreChoice;
   const scorePosition = target.closest<HTMLElement>("[data-score-position]")?.dataset.scorePosition;
   const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
+  const speed = target.closest<HTMLElement>("[data-speed]")?.dataset.speed;
   const subject = target.closest<HTMLElement>("[data-subject]")?.dataset.subject as
     | SubjectId
     | undefined;
@@ -176,6 +185,10 @@ root.addEventListener("click", (event) => {
   }
   if (scorePosition !== undefined) {
     resolveScorePosition(Number(scorePosition));
+    return;
+  }
+  if (speed !== undefined) {
+    setSpeedMultiplier(Number(speed));
     return;
   }
   if (action === "skip-draft") {
@@ -238,8 +251,11 @@ root.addEventListener("click", (event) => {
   }
   if (action === "sprint") {
     state.autoPlay = true;
+    state.speedMultiplier = 1;
     state.speedMs = 0;
+    state.sprintExamIndex = state.activeExam?.index;
     state.waitingNext?.();
+    render();
     return;
   }
   if (action === "copy-feedback") {
@@ -272,6 +288,8 @@ root.addEventListener("input", (event) => {
   }
 });
 
+window.addEventListener("resize", syncColumnHeights);
+
 render();
 
 function render(): void {
@@ -279,13 +297,29 @@ function render(): void {
   const activeKind = state.activeTrigger?.kind ?? state.scoreFlash?.kind ?? "chain:step";
   root.innerHTML = `
     <div class="app-shell fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""}">
-      ${renderTopbar()}
       <main class="paper-field">${renderPhase()}</main>
       ${renderGlobalTriggerToast()}
       ${renderScoreChoicePrompt()}
       ${renderFooter()}
     </div>
   `;
+  syncColumnHeights();
+}
+
+function syncColumnHeights(): void {
+  window.requestAnimationFrame(() => {
+    const examGrid = root.querySelector<HTMLElement>(".compact-exam-grid");
+    const examLeftColumn = root.querySelector<HTMLElement>(".compact-exam-grid .exam-stage");
+    if (examGrid && examLeftColumn) {
+      examGrid.style.setProperty("--left-column-height", `${Math.ceil(examLeftColumn.getBoundingClientRect().height)}px`);
+    }
+
+    const startGrid = root.querySelector<HTMLElement>(".start-layout-debug");
+    const startLeftColumn = root.querySelector<HTMLElement>(".start-layout-debug .start-panel");
+    if (startGrid && startLeftColumn) {
+      startGrid.style.setProperty("--start-left-column-height", `${Math.ceil(startLeftColumn.getBoundingClientRect().height)}px`);
+    }
+  });
 }
 
 function requireElement(id: string): HTMLElement {
@@ -294,24 +328,6 @@ function requireElement(id: string): HTMLElement {
     throw new Error(`Missing #${id}`);
   }
   return element;
-}
-
-function renderTopbar(): string {
-  const subjectSummary = subjectOrderLabels().join(" / ");
-  return `
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">准</span>
-        <span>请选择你的高考遗物</span>
-      </div>
-      <div class="topbar-actions">
-        <span class="topbar-subjects">${escapeHtml(subjectSummary)}</span>
-        ${DEBUG_ROUTE ? `<span class="local-mode debug-mode-chip">DEBUG ${state.debugArtifactIds.length}</span>` : ""}
-        <span class="seed">SEED ${escapeHtml(state.seed)}</span>
-        <button class="ghost-button" type="button" data-action="restart">重开</button>
-      </div>
-    </header>
-  `;
 }
 
 function renderPhase(): string {
@@ -423,7 +439,7 @@ function renderScorePositionButton(
 function renderStart(): string {
   return `
     <section class="start-screen">
-      <div class="start-layout">
+      <div class="start-layout ${DEBUG_ROUTE ? "start-layout-debug" : ""}">
         <section class="start-panel answer-card-panel">
           <div class="answer-card-title">
             <p class="mono-label">ADMISSION CARD</p>
@@ -432,14 +448,6 @@ function renderStart(): string {
           <div class="answer-card-sheet" aria-label="答题卡开局设置">
             <div class="sheet-secret-line">姓名、准考证号填写处</div>
             ${renderTicketProfile(state.subjects)}
-            <div class="sheet-bubbles" aria-hidden="true">
-              ${Array.from({ length: 36 }, (_, index) => renderStartBubble(index)).join("")}
-            </div>
-          </div>
-          <div class="rules-note">
-            <div><span>必考</span><strong>${REQUIRED_SUBJECTS.map((subject) => SUBJECT_LABELS[subject]).join(" / ")}</strong></div>
-            <div><span>选科</span><strong>${selectedElectiveLabels()}</strong></div>
-            <div><span>遗物</span><strong>${DEBUG_ROUTE ? `DEBUG ${state.debugArtifactIds.length} 件` : "开局 6 抽"}</strong></div>
           </div>
           <div class="start-actions">
             <button class="primary-button full-width" type="button" data-action="start-run">开始考试</button>
@@ -462,11 +470,6 @@ function renderStart(): string {
   `;
 }
 
-function renderStartBubble(index: number): string {
-  const filled = state.subjects.length * 3 > index || index % 11 === 0;
-  return `<span class="${filled ? "filled" : ""}"></span>`;
-}
-
 function renderLoading(): string {
   return `
     <section class="result-screen shared-result-screen">
@@ -484,7 +487,7 @@ function renderDraft(prompt: ChoicePrompt): string {
   const rollIndex = Math.min(6, prompt.sequence);
   const selected = state.subjects;
   return `
-    <section class="draft-screen">
+    <section class="draft-screen ${prompt.discard ? "draft-screen-discard" : ""}">
       <div class="draft-heading">
         <p class="mono-label">${
           prompt.discard ? "OVERFLOW DISCARD" : opening ? `OPENING ROLL ${rollIndex}/6` : "NEXT SUBJECT ROLL"
@@ -646,22 +649,25 @@ function renderExistingBuild(): string {
 function renderExam(): string {
   const exam = state.activeExam!;
   const question = state.currentQuestion;
-  const pending = Math.max(0, 15 - Math.min(15, exam.questionIndex));
+  const rule = SUBJECT_EXAM_RULES[exam.subject];
+  const pending = Math.max(0, rule.questionCount - Math.min(rule.questionCount, exam.questionIndex));
   const intensity = state.activeTrigger?.intensity ?? state.scoreFlash?.intensity ?? "low";
   return `
     <section class="game-grid compact-exam-grid">
       <section class="exam-stage exam-paper fx-stage fx-${intensity}" aria-label="当前答题与词条触发">
         ${renderExamHeader(exam, pending)}
-      ${renderScreenFx()}
-      ${renderTriggerOverlay()}
-      <div class="exam-priority">
-        ${renderQuestionCard(exam, question)}
-        ${renderTriggerStage()}
+        ${renderScreenFx()}
+        ${renderTriggerOverlay()}
+        ${renderExamSettlement()}
+        <div class="exam-priority">
+          ${renderQuestionCard(exam, question)}
+          ${renderTriggerStage()}
         </div>
         <div class="exam-controls">
-          <button class="primary-button" type="button" data-action="next-question" ${state.waitingNext ? "" : "disabled"}>判定下一题</button>
           <button class="secondary-button" type="button" data-action="toggle-auto">${state.autoPlay ? "暂停自动" : "继续自动"}</button>
+          ${renderSpeedControl()}
           <button class="secondary-button" type="button" data-action="sprint">快速跳过</button>
+          <button class="secondary-button" type="button" data-action="restart">重开</button>
         </div>
       </section>
       <section class="support-drawers" aria-label="次要信息">
@@ -672,6 +678,113 @@ function renderExam(): string {
       </section>
     </section>
   `;
+}
+
+function renderSpeedControl(): string {
+  return `
+    <div class="speed-control" role="group" aria-label="加速">
+      <span>加速</span>
+      ${SPEED_MULTIPLIERS.map(
+        (speed) => `
+          <button
+            class="speed-button ${state.speedMultiplier === speed ? "active" : ""}"
+            type="button"
+            data-speed="${speed}"
+            aria-pressed="${state.speedMultiplier === speed}"
+          >${speed}x</button>
+        `
+      ).join("")}
+    </div>
+  `;
+}
+
+function renderExamSettlement(): string {
+  const exam = state.examSettlement;
+  if (!exam) return "";
+  const total = currentScore();
+  const rawScore = exam.rawScore ?? exam.score;
+  const examMultiplier = exam.examMultiplier ?? 1;
+  const examPostBonus = exam.examPostBonus ?? 0;
+  const multipliedScore = Math.round(rawScore * examMultiplier * 100) / 100;
+  const bonusNode = Math.abs(examPostBonus) > 0.0001
+    ? `
+          <i>+</i>
+          <span class="settlement-bonus">
+            <b>结算加分</b>
+            <strong>${formatNumber(examPostBonus)}</strong>
+          </span>
+      `
+    : "";
+  const floats = [
+    `+${exam.score}`,
+    `原始分 ${formatNumber(rawScore)}`,
+    `得分倍率 x${formatNumber(examMultiplier)}`,
+    `=${formatNumber(multipliedScore)}`,
+    `${SUBJECT_LABELS[exam.subject]} ${exam.score}`,
+    `答对 ${exam.correctCount}`,
+    `答错 ${exam.wrongCount}`,
+    `总分 ${total}`
+  ];
+  return `
+    <section class="exam-settlement-layer" role="dialog" aria-modal="true">
+      <div class="settlement-float-field" aria-hidden="true">
+        ${floats.map((label, index) => renderSettlementFloat(label, index)).join("")}
+      </div>
+      <article class="settlement-card exam-paper">
+        <div class="settlement-card-head">
+          <span>${SUBJECT_LABELS[exam.subject]}</span>
+          <strong>${exam.score}</strong>
+        </div>
+        <div class="settlement-formula" aria-label="本场结算公式">
+          <span>
+            <b>原始分</b>
+            <strong>${formatNumber(rawScore)}</strong>
+          </span>
+          <i>x</i>
+          <span class="settlement-multiplier">
+            <b>得分倍率</b>
+            <strong>x${formatNumber(examMultiplier)}</strong>
+          </span>
+          <i>=</i>
+          <span class="settlement-product">
+            <b>倍率分</b>
+            <strong>${formatNumber(multipliedScore)}</strong>
+          </span>
+          ${bonusNode}
+        </div>
+        <div class="settlement-score-shell">
+          <span class="settlement-light-burst" aria-hidden="true"></span>
+          <div class="settlement-score ${exam.score > SUBJECT_EXAM_RULES[exam.subject].fullScore ? "over-score" : ""}">${exam.score}</div>
+        </div>
+        <div class="settlement-stat-grid">
+          <div><span>答对</span><strong>${exam.correctCount}</strong></div>
+          <div><span>答错</span><strong>${exam.wrongCount}</strong></div>
+          <div><span>总分</span><strong>${total}</strong></div>
+        </div>
+        <div class="settlement-subject-strip">
+          ${state.exams
+            .map((item) => `<span>${SUBJECT_LABELS[item.subject]} <strong>${item.score}</strong></span>`)
+            .join("")}
+        </div>
+        <button class="primary-button" type="button" data-action="next-question">开始考试</button>
+      </article>
+    </section>
+  `;
+}
+
+function renderSettlementFloat(label: string, index: number): string {
+  const positions = [
+    ["16%", "22%"],
+    ["72%", "20%"],
+    ["10%", "62%"],
+    ["80%", "58%"],
+    ["28%", "78%"],
+    ["62%", "76%"],
+    ["48%", "18%"],
+    ["46%", "84%"]
+  ];
+  const [x, y] = positions[index % positions.length];
+  return `<span style="--x:${x};--y:${y};--i:${index}">${escapeHtml(label)}</span>`;
 }
 
 function renderPaperStatusTile(label: string, value: string, key: keyof LiveExamStatus, idleText = "当前"): string {
@@ -691,9 +804,10 @@ function renderPaperStatusTile(label: string, value: string, key: keyof LiveExam
 }
 
 function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: number): string {
-  const done = Math.min(15, exam.questionIndex);
+  const rule = SUBJECT_EXAM_RULES[exam.subject];
+  const done = Math.min(rule.questionCount, exam.questionIndex);
   const total = state.exams.reduce((sum, item) => sum + item.score, 0) + exam.score + state.scoreAdjustment;
-  const progress = Math.min(100, (done / 15) * 100);
+  const progress = Math.min(100, (done / rule.questionCount) * 100);
   const trigger = state.activeTrigger;
   const flash = trigger ?? state.scoreFlash;
   return `
@@ -707,12 +821,13 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
         <div class="paper-title-block compact-paper-title">
           <p class="mono-label">AUTO EXAM STATUS</p>
           <h2>${SUBJECT_LABELS[exam.subject]}</h2>
-          <small>第 ${exam.index + 1}/${subjectOrder().length} 场 · 答题点 ${done}/15 · 剩余 ${pending}</small>
+          <small>第 ${exam.index + 1}/${subjectOrder().length} 场 · 答题点 ${done}/${rule.questionCount} · 剩余 ${pending}</small>
         </div>
         <div class="paper-score-total score-box-total ${flash ? `score-flash flash-${flash.intensity}` : ""}">
-          <span>总分</span>
-          <strong class="${total > 750 ? "over-score" : ""}">${Math.round(total)}</strong>
-          <small>${flash?.kind === "score:add" ? escapeHtml(flash.label) : "累计"}</small>
+          <em class="paper-total-corner">总分 ${Math.round(total)}</em>
+          <span>分数</span>
+          <strong class="${exam.score > rule.fullScore ? "over-score" : ""}">${Math.round(exam.score)}</strong>
+          <small>${SUBJECT_LABELS[exam.subject]}当前分</small>
         </div>
         <div class="paper-status-grid">
           ${renderPaperStatusTile("正确率", `${formatNumber(state.liveStatus.accuracy)}%`, "accuracy")}
@@ -733,7 +848,7 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
       <div class="paper-progress-row">
         <div class="budget-bar" aria-label="答题点进度"><span style="width:${progress}%"></span></div>
         <div class="budget-text">
-          <span>答题点 ${done} / 15</span>
+          <span>答题点 ${done} / ${rule.questionCount}</span>
           <span>CHAIN ${state.chainCount}</span>
         </div>
       </div>
@@ -742,6 +857,7 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
 }
 
 function renderQuestionCard(exam: NonNullable<UiState["activeExam"]>, question?: QuestionLog): string {
+  const rule = SUBJECT_EXAM_RULES[exam.subject];
   const resultClass = question ? (question.correct ? "result-success" : "result-fail") : "result-pending";
   const titleIndex = Math.max(1, exam.questionIndex);
   return `
@@ -749,7 +865,7 @@ function renderQuestionCard(exam: NonNullable<UiState["activeExam"]>, question?:
       <div class="scanline"></div>
       <div class="question-top">
         <span class="mono-label">QUESTION ${String(titleIndex).padStart(2, "0")}</span>
-        <span class="score-pill">10 分</span>
+        <span class="score-pill">${rule.pointsPerQuestion} 分</span>
       </div>
       <h1>${SUBJECT_LABELS[exam.subject]} 第 ${titleIndex} 题</h1>
       <div class="question-meta">
@@ -758,7 +874,7 @@ function renderQuestionCard(exam: NonNullable<UiState["activeExam"]>, question?:
         <span>掷骰 ${question?.roll ?? "--"}</span>
       </div>
       <div class="answer-grid">
-        ${Array.from({ length: 15 }, (_, index) => renderAnswerDot(index + 1)).join("")}
+        ${Array.from({ length: rule.questionCount }, (_, index) => renderAnswerDot(index + 1, rule.pointsPerQuestion)).join("")}
       </div>
       <div class="tag-row large">
         <span>体力 ${question ? `${question.staminaBefore}->${question.staminaAfter}` : "--"}</span>
@@ -769,7 +885,7 @@ function renderQuestionCard(exam: NonNullable<UiState["activeExam"]>, question?:
   `;
 }
 
-function renderAnswerDot(index: number): string {
+function renderAnswerDot(index: number, pointsPerQuestion: number): string {
   const logged = state.examQuestions.find((question) => question.questionIndex === index);
   const active = state.activeExam?.questionIndex === index && !logged ? " active" : "";
   if (!logged) {
@@ -777,7 +893,7 @@ function renderAnswerDot(index: number): string {
   }
   const cls = logged.correct ? "answer-success" : "answer-fail";
   const label = logged.correct ? "成功" : "失误";
-  return `<span class="${cls}${active}" data-index="${index}" title="第 ${index} 题：${label} ${logged.scoreGained}/10"></span>`;
+  return `<span class="${cls}${active}" data-index="${index}" title="第 ${index} 题：${label} ${logged.scoreGained}/${pointsPerQuestion}"></span>`;
 }
 
 function renderTriggerOverlay(): string {
@@ -946,11 +1062,11 @@ function renderHelpDoc(): string {
       </section>
       <section>
         <h3>题目</h3>
-        <p>每科 15 题，每题基础 10 分，单科满分 150 分，六科标准满分 900 分；答对得 10 x 本题倍率，答错通常不得分。</p>
+        <p>语文、数学、英语各 15 题，单科满分 150 分；3 门选考科目各 10 题，单科满分 100 分。每题基础 10 分，六科标准满分 750 分。</p>
       </section>
       <section>
         <h3>正确率</h3>
-        <p>判题时先算最终正确率 = 基础正确率 x 当前体力 / 100 + 本题正确率加成，再被相关遗物修正；随机掷骰小于正确率则答对，判定区间按 0% 到 100% 夹紧。</p>
+        <p>判题时先算最终正确率 = 基础正确率 x 当前体力 / 100 + 本题正确率加成，再被相关遗物修正；超过 100% 的部分可被部分遗物转换成倍率收益。</p>
       </section>
       <section>
         <h3>体力与倍率</h3>
@@ -958,11 +1074,11 @@ function renderHelpDoc(): string {
       </section>
       <section>
         <h3>无尽模式</h3>
-        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，通关门槛从 750 开始每年上涨 30%。</p>
+        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，通关门槛从 750 开始每年 x1.5。</p>
       </section>
       <section>
         <h3>操作</h3>
-        <p>自动模式会连续判题；暂停自动后可以手动点击“判定下一题”；“快速跳过”会把剩余流程高速播放完。</p>
+        <p>自动模式会连续判题；暂停自动后可点击“继续自动”恢复；加速可切换 1x、2x、4x、8x 播放速度。</p>
       </section>
     </div>
   `;
@@ -1015,7 +1131,7 @@ function renderResult(result: RunResult): string {
             <span>${passedThreshold ? "无尽模式可继续" : "本轮战报封存"}</span>
             <strong>${passedThreshold ? `下一年门槛 ${nextThreshold}` : `未超过 ${result.threshold}`}</strong>
           </div>
-          <p>${passedThreshold ? "进入下一年后，保留当前遗物组；每科开考前获得一次 4 选 1，分数门槛上涨 30%。" : "超过 750 分后才可进入无尽模式；无尽年需要继续超过当年门槛。"}</p>
+          <p>${passedThreshold ? "进入下一年后，保留当前遗物组；每科开考前获得一次 4 选 1，分数门槛 x1.5。" : "超过 750 分后才可进入无尽模式；无尽年需要继续超过当年门槛。"}</p>
         </div>
         ${renderShareCard(result, title, overflow)}
         <div class="result-subjects">
@@ -1119,7 +1235,7 @@ function resultTitle(score: number): string {
 }
 
 function nextEndlessThreshold(threshold: number): number {
-  return Math.ceil(threshold * 1.3);
+  return Math.ceil(threshold * 1.5);
 }
 
 function renderFooter(): string {
@@ -1284,6 +1400,7 @@ function buildIssueBundle(): Record<string, unknown> {
     phase: state.phase,
     subjects: subjectOrder().map((subject) => SUBJECT_LABELS[subject]),
     autoPlay: state.autoPlay,
+    speedMultiplier: state.speedMultiplier,
     speedMs: state.speedMs,
     liveStatus: state.liveStatus,
     score: state.result?.totalScore ?? currentScore(),
@@ -1354,6 +1471,39 @@ function subjectOrderLabels(): string[] {
 
 function selectedElectiveLabels(): string {
   return state.subjects.map((subject) => SUBJECT_LABELS[subject]).join(" / ") || "未选择";
+}
+
+function setSpeedMultiplier(value: number): void {
+  if (!SPEED_MULTIPLIERS.includes(value as SpeedMultiplier)) return;
+  state.speedMultiplier = value as SpeedMultiplier;
+  state.speedMs = speedDelayMs(state.speedMultiplier);
+  state.sprintExamIndex = undefined;
+  state.autoPlay = true;
+  state.waitingNext?.();
+  render();
+}
+
+function restoreNormalSpeed(): void {
+  state.speedMultiplier = 1;
+  state.speedMs = speedDelayMs(state.speedMultiplier);
+  state.sprintExamIndex = undefined;
+  state.autoPlay = true;
+}
+
+function speedDelayMs(multiplier: SpeedMultiplier): number {
+  return Math.round(BASE_SPEED_MS / multiplier);
+}
+
+function scoreFlashDelayMs(): number {
+  return Math.max(80, Math.min(420, Math.round(state.speedMs * 0.46)));
+}
+
+function triggerDelayMs(timing: TriggerEvent["timing"]): number {
+  if (timing === "EXAM_END") {
+    return Math.max(1000, Math.min(1500, Math.round(state.speedMs * 0.9)));
+  }
+  if (state.speedMs <= 0) return 0;
+  return Math.max(80, Math.round(state.speedMs * 0.55));
 }
 
 function debugSearchResults(): ArtifactConfig[] {
@@ -1443,6 +1593,7 @@ function resetRunState(): void {
   state.visualEvents = [];
   state.triggerQueue = [];
   state.activeTrigger = undefined;
+  state.examSettlement = undefined;
   state.liveStatus = {
     accuracy: 50,
     questionMultiplier: 1,
@@ -1461,7 +1612,9 @@ function resetRunState(): void {
   state.result = undefined;
   state.sharedReport = undefined;
   state.scoreChoicePrompt = undefined;
-  state.speedMs = 920;
+  state.speedMultiplier = 1;
+  state.speedMs = speedDelayMs(state.speedMultiplier);
+  state.sprintExamIndex = undefined;
 }
 
 function resetToStart(newSeed: boolean): void {
@@ -1551,6 +1704,10 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.visualEvents = [];
       state.triggerQueue = [];
       state.activeTrigger = undefined;
+      state.examSettlement = undefined;
+      if (state.sprintExamIndex !== undefined && state.sprintExamIndex !== exam.index) {
+        restoreNormalSpeed();
+      }
       state.chainCount = 0;
       state.scoreFlash = undefined;
       state.scoreAdjustment = 0;
@@ -1570,6 +1727,7 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.liveStatus = exam.status;
       state.activeTrigger = undefined;
       state.triggerQueue = [];
+      state.examSettlement = undefined;
       state.chainCount = 0;
       state.scoreFlash = undefined;
       state.activeExam = {
@@ -1608,23 +1766,44 @@ function createRunHooks(runId: number): ChoiceHooks {
           state.scoreFlash = undefined;
           render();
         }
-      }, state.speedMs > 0 ? 420 : 80);
+      }, scoreFlashDelayMs());
     },
-    onExamEnd: (exam) => {
+    onExamEnd: async (exam) => {
       if (!isCurrentRun(runId)) return;
+      const endedExamIndex = state.activeExam?.index;
+      const visualEvent: VisualEvent = {
+        id: `settlement-${Date.now()}-${exam.subject}`,
+        label: `+${exam.score}`,
+        tone: "score",
+        kind: "score:add",
+        intensity: scoreIntensity(exam.score, state.liveStatus)
+      };
       state.exams = [...state.exams, exam];
       state.activeExam = state.activeExam
         ? {
             ...state.activeExam,
-            score: exam.score
+            score: 0
           }
         : state.activeExam;
       state.scoreAdjustment = 0;
+      state.scoreFlash = visualEvent;
+      state.visualEvents = [visualEvent, ...state.visualEvents].slice(0, 12);
+      state.examSettlement = exam;
+      if (state.sprintExamIndex === endedExamIndex) {
+        restoreNormalSpeed();
+      }
+      render();
+      await waitForExamSettlement(runId);
+      if (!isCurrentRun(runId)) return;
+      state.examSettlement = undefined;
+      state.scoreFlash = undefined;
       render();
     },
     onRunEnd: (result) => {
       if (!isCurrentRun(runId)) return;
       state.result = result;
+      state.examSettlement = undefined;
+      restoreNormalSpeed();
       state.phase = "result";
     }
   };
@@ -1785,6 +1964,17 @@ function waitForNextQuestion(runId: number): Promise<void> {
   });
 }
 
+function waitForExamSettlement(runId: number): Promise<void> {
+  if (!isCurrentRun(runId)) return Promise.resolve();
+  return new Promise((resolve) => {
+    state.waitingNext = () => {
+      state.waitingNext = undefined;
+      resolve();
+      render();
+    };
+  });
+}
+
 async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<void> {
   const visualEvent = triggerEventToVisual(event);
   state.chainCount += 1;
@@ -1800,8 +1990,9 @@ async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<voi
   state.scoreAdjustment = event.scoreAfter.currentTotalAdjustment;
   state.visualEvents = [visualEvent, ...state.visualEvents].slice(0, 12);
   render();
-  if (state.speedMs > 0) {
-    await delay(Math.max(500, Math.min(620, state.speedMs * 0.55)));
+  const triggerDelay = triggerDelayMs(event.timing);
+  if (triggerDelay > 0) {
+    await delay(triggerDelay);
   }
   if (!isCurrentRun(runId)) return;
   state.triggerQueue = state.triggerQueue.filter((item) => item.id !== visualEvent.id);
