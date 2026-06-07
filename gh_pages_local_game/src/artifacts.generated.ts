@@ -435,7 +435,7 @@ export const LOCAL_ARTIFACTS = [
       "销毁",
       "分数补偿"
     ],
-    "description": "销毁最左侧其他遗物；下场考试初始分 +200。",
+    "description": "销毁最左侧的遗物(若为自身则不销毁)；下场考试初始分 +200。",
     "modifiers": [],
     "triggers": [
       {
