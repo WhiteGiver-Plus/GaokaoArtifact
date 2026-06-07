@@ -14,7 +14,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: "gh_pages_local_game/index.html",
-        debug: "gh_pages_local_game/debug/index.html"
+        debug: "gh_pages_local_game/debug/index.html",
+        resultDebug: "gh_pages_local_game/result-debug/index.html"
       }
     }
   }

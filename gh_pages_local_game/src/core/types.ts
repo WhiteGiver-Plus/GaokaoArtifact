@@ -8,6 +8,8 @@ export const ELECTIVE_SUBJECTS = [
   "geography"
 ] as const;
 
+export const DEFAULT_ELECTIVE_SUBJECTS = ["physics", "chemistry", "biology"] as const;
+
 export const SUBJECT_LABELS: Record<SubjectId, string> = {
   chinese: "语文",
   math: "数学",
@@ -209,6 +211,9 @@ export interface QuestionLog {
   accuracy: number;
   roll: number;
   correct: boolean;
+  questionBaseScore: number;
+  questionMultiplier: number;
+  questionFlatScore: number;
   scoreGained: number;
 }
 
@@ -255,6 +260,7 @@ export interface TriggerEvent {
   artifactId: string;
   artifactName: string;
   timing: Timing;
+  sourceTiming?: Timing;
   triggerIndex: number;
   slotIndex: number;
   effectText: string;
@@ -263,6 +269,7 @@ export interface TriggerEvent {
   after: LiveExamStatus;
   scoreBefore: LiveScoreStatus;
   scoreAfter: LiveScoreStatus;
+  questionScoreGained?: number;
 }
 
 export interface GameOptions {
@@ -311,7 +318,7 @@ export interface ChoiceHooks {
       currentTotalScore: number;
       status: LiveExamStatus;
     }
-  ) => void;
+  ) => Promise<void> | void;
   onExamEnd?: (exam: ExamLog) => Promise<void> | void;
   onRunEnd?: (result: RunResult) => void;
 }

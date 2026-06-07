@@ -15,7 +15,7 @@ import type {
   Timing,
   TriggerContext
 } from "./types.js";
-import { ELECTIVE_SUBJECTS, REQUIRED_SUBJECTS, SUBJECT_EXAM_RULES, SUBJECT_LABELS } from "./types.js";
+import { DEFAULT_ELECTIVE_SUBJECTS, ELECTIVE_SUBJECTS, REQUIRED_SUBJECTS, SUBJECT_EXAM_RULES, SUBJECT_LABELS } from "./types.js";
 import { defaultSeed } from "./rng.js";
 import { appendLog, createGameState, createOwnedArtifact, type GameState } from "./state.js";
 import { evaluateCondition } from "./conditions.js";
@@ -26,6 +26,10 @@ import { calcLayerForEffects, phaseForTiming } from "./phases.js";
 import { queryModifierValue } from "./modifierSystem.js";
 
 const EVENT_TRIGGER_LIMIT = 20;
+const NON_REPLAYABLE_SCORE_EFFECTS = new Set<EffectConfig["op"]>([
+  "maximizeOnesDigit",
+  "maximizeDigitSwap"
+]);
 
 export async function runGame(
   artifactConfigs: ArtifactConfig[],
@@ -89,7 +93,7 @@ export async function runGame(
 
 function normalizeSubjects(subjects?: SubjectId[]): SubjectId[] {
   const electives = subjects?.filter((subject) => !REQUIRED_SUBJECTS.includes(subject as never));
-  const selectedElectives = electives?.length === 3 ? electives : ELECTIVE_SUBJECTS.slice(0, 3);
+  const selectedElectives = electives?.length === 3 ? electives : [...DEFAULT_ELECTIVE_SUBJECTS];
   return [...REQUIRED_SUBJECTS, ...selectedElectives];
 }
 
@@ -481,6 +485,7 @@ async function executeTrigger(
     artifactId: context.owner.artifactId,
     artifactName: artifactNameText,
     timing: context.timing,
+    sourceTiming: context.sourceTrigger?.timing,
     triggerIndex: context.triggerIndex,
     slotIndex: state.artifacts.findIndex((item) => item.instanceId === context.owner.instanceId),
     effectText,
@@ -488,7 +493,8 @@ async function executeTrigger(
     before,
     after,
     scoreBefore,
-    scoreAfter
+    scoreAfter,
+    questionScoreGained: exam?.currentQuestionLog?.scoreGained
   });
 
   if (!context.replay && context.timing !== "OTHER_ARTIFACT_TRIGGERED") {
@@ -536,7 +542,7 @@ function describeEffect(effect: EffectConfig): string {
     case "addExamScore":
       return `本场分数 ${formatSigned(effect.value)}`;
     case "addExamPostBonus":
-      return `最终得分增加 ${formatSigned(effect.value)}`;
+      return `最终得分 ${formatSigned(effect.value)}`;
     case "setExamScoreToFull":
       return "本场分数至少满分";
     case "addNextExamScore":
@@ -605,7 +611,6 @@ function captureLiveScoreStatus(state: GameState, exam: ExamState | undefined): 
   const currentTotal = Math.round(
     state.exams.reduce((sum, examLog) => sum + examLog.score, 0) +
       currentExamScore +
-      examPostBonus +
       currentTotalAdjustment
   );
   return {
@@ -792,7 +797,7 @@ async function mimicRightArtifact(
   const config = state.artifactById.get(right.artifactId);
   const triggers = config?.triggers
     .map((trigger, triggerIndex) => ({ trigger, triggerIndex }))
-    .filter((item) => item.trigger.timing === context.timing);
+    .filter((item) => item.trigger.timing === context.timing && canReplayTrigger(item.trigger));
   if (!triggers || triggers.length === 0) {
     return false;
   }
@@ -825,6 +830,9 @@ async function repeatSourceTrigger(
 ): Promise<boolean> {
   const source = context.sourceTrigger;
   if (!source || source.replay) {
+    return false;
+  }
+  if (!canReplayTrigger(source.trigger)) {
     return false;
   }
   const chance = Number(context.trigger.params?.chance ?? 0);
@@ -867,7 +875,7 @@ async function triggerRightOnOtherTrigger(
   const config = right ? state.artifactById.get(right.artifactId) : undefined;
   const trigger = config?.triggers
     .map((item, triggerIndex) => ({ item, triggerIndex }))
-    .find((item) => item.item.timing === source.timing);
+    .find((item) => item.item.timing === source.timing && canReplayTrigger(item.item));
   if (!right || !trigger) {
     return false;
   }
@@ -884,6 +892,10 @@ async function triggerRightOnOtherTrigger(
     hooks,
     options
   );
+}
+
+function canReplayTrigger(trigger: ArtifactTriggerConfig): boolean {
+  return !(trigger.effects ?? []).some((effect) => NON_REPLAYABLE_SCORE_EFFECTS.has(effect.op));
 }
 
 function triggerLuckyBlock(
@@ -1074,9 +1086,11 @@ async function scoreQuestion(
 ): Promise<void> {
   await triggerEvent(state, "QUESTION_SCORE", exam, hooks, options);
   const multiplier = calculateQuestionMultiplier(state, exam);
+  const questionBaseScore = (correct ? exam.pointsPerQuestion : 0) + exam.currentQuestionBaseScore;
+  const questionFlatScore = exam.currentQuestionFlatScore;
   const scoreGained =
-    ((correct ? exam.pointsPerQuestion : 0) + exam.currentQuestionBaseScore) * multiplier +
-    exam.currentQuestionFlatScore;
+    questionBaseScore * multiplier +
+    questionFlatScore;
   exam.rawScore += scoreGained;
   const staminaBefore = state.stats.stamina;
 
@@ -1088,6 +1102,9 @@ async function scoreQuestion(
     accuracy: Math.round(accuracy * 100) / 100,
     roll: Math.round(roll * 100) / 100,
     correct,
+    questionBaseScore: Math.round(questionBaseScore * 100) / 100,
+    questionMultiplier: Math.round(multiplier * 100) / 100,
+    questionFlatScore: Math.round(questionFlatScore * 100) / 100,
     scoreGained: Math.round(scoreGained * 100) / 100
   };
   exam.currentQuestionLog = questionLog;
@@ -1099,7 +1116,7 @@ async function scoreQuestion(
   await triggerEvent(state, "QUESTION_END", exam, hooks, options);
   questionLog.staminaAfter = Math.round(state.stats.stamina * 100) / 100;
   appendLog(state, describeQuestionState(exam, questionLog, multiplier));
-  hooks.onQuestion?.(questionLog, {
+  await hooks.onQuestion?.(questionLog, {
     index: exam.index,
     subject: exam.subject,
     rawScore: Math.round(exam.rawScore * 100) / 100,

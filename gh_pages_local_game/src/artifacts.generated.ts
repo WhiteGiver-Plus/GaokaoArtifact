@@ -636,7 +636,7 @@ export const LOCAL_ARTIFACTS = [
       "体力",
       "风险收益"
     ],
-    "description": "最终正确率 +1000%，每场考试开始时体力 +1000；每场考试结束时，考试原始分 -1000。",
+    "description": "最终正确率 +1000%，每场考试开始时体力 +1000；每场考试结束时，考试最终得分 -1000。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -659,7 +659,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "effects": [
           {
-            "op": "addExamScore",
+            "op": "addExamPostBonus",
             "value": -1000
           }
         ]
@@ -801,7 +801,7 @@ export const LOCAL_ARTIFACTS = [
       "倍率成长",
       "风险收益"
     ],
-    "description": "每场考试前 8 题，得分倍率 -0.8；第 9 题起，得分倍率 +0.8。",
+    "description": "每场考试前 8 题，得分倍率 -0.8；第 9 题起，得分倍率 +8。",
     "modifiers": [],
     "triggers": [
       {
@@ -828,7 +828,7 @@ export const LOCAL_ARTIFACTS = [
         "effects": [
           {
             "op": "addQuestionMultiplier",
-            "value": 0.8
+            "value": 8
           }
         ]
       }
@@ -1421,7 +1421,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "all_for_nothing",
-    "name": "前功尽弃",
+    "name": "好了好了,这下坏了",
     "rarity": "uncommon",
     "tags": [
       "胜败交替",
@@ -1458,7 +1458,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "learn_from_mistakes",
-    "name": "知错能改",
+    "name": "坏了坏了,这下好了",
     "rarity": "uncommon",
     "tags": [
       "胜败交替",

@@ -1,5 +1,8 @@
+import QRCode from "qrcode";
+import { toPng } from "html-to-image";
 import { LOCAL_ARTIFACTS } from "./artifacts.generated.js";
 import {
+  DEFAULT_ELECTIVE_SUBJECTS,
   ELECTIVE_SUBJECTS,
   REQUIRED_SUBJECTS,
   runGame,
@@ -17,7 +20,9 @@ import {
 
 const root = requireElement("root");
 const DEBUG_ROUTE = isDebugRoute();
+const RESULT_DEBUG_ROUTE = isResultDebugRoute();
 const SPEED_MULTIPLIERS = [1, 2, 4, 8] as const satisfies readonly SpeedMultiplier[];
+const DEFAULT_SPEED_MULTIPLIER: SpeedMultiplier = 2;
 const BASE_SPEED_MS = 920;
 
 type Phase = "start" | "loading" | "draft" | "exam" | "result";
@@ -26,6 +31,7 @@ type EffectIntensity = "low" | "medium" | "high" | "jackpot";
 type SpeedMultiplier = 1 | 2 | 4 | 8;
 type VisualEventKind =
   | "score:add"
+  | "score:bank"
   | "score:fail"
   | "multiplier:increase"
   | "chain:step"
@@ -63,13 +69,18 @@ interface VisualEvent {
   intensity: EffectIntensity;
   artifactId?: string;
   effectText?: string;
+  detailText?: string;
   deltas?: StatDelta[];
   scoreDelta?: number;
   scoreBefore?: number;
   scoreAfter?: number;
+  examScoreBefore?: number;
+  examScoreAfter?: number;
+  scoreBanking?: boolean;
   slotIndex?: number;
   replay?: boolean;
   chainIndex?: number;
+  settling?: boolean;
 }
 
 interface SharedReport {
@@ -113,7 +124,7 @@ interface UiState {
   choicePrompt?: ChoicePrompt;
   activeExam?: { index: number; subject: SubjectId; questionIndex: number; score: number };
   currentQuestion?: QuestionLog;
-  waitingNext?: () => void;
+  settlementContinue?: () => void;
   result?: RunResult;
   sharedReport?: SharedReport;
   scoreChoicePrompt?: ScoreChoicePrompt;
@@ -123,23 +134,26 @@ interface UiState {
   autoPlay: boolean;
   speedMultiplier: SpeedMultiplier;
   speedMs: number;
-  sprintExamIndex?: number;
+  skipToSettlement: boolean;
   debugArtifactIds: string[];
+  debugSearchInput: string;
   debugSearch: string;
   footerNotice?: string;
-  footerOpen: boolean;
 }
+
+const RESULT_DEBUG_RUN = RESULT_DEBUG_ROUTE ? createResultDebugRun() : undefined;
+const RESULT_DEBUG_ARTIFACTS = RESULT_DEBUG_RUN ? artifactsForResult(RESULT_DEBUG_RUN) : [];
 
 const state: UiState = {
   runId: 0,
-  phase: "start",
-  seed: defaultSeed(),
-  playerName: readPlayerName(),
-  subjects: ELECTIVE_SUBJECTS.slice(0, 3) as SubjectId[],
-  artifacts: [],
-  exams: [],
+  phase: RESULT_DEBUG_RUN ? "result" : "start",
+  seed: RESULT_DEBUG_RUN?.seed ?? defaultSeed(),
+  playerName: RESULT_DEBUG_RUN ? "结算页调试" : readPlayerName(),
+  subjects: RESULT_DEBUG_RUN?.subjects ?? [...DEFAULT_ELECTIVE_SUBJECTS],
+  artifacts: RESULT_DEBUG_ARTIFACTS,
+  exams: RESULT_DEBUG_RUN?.exams ?? [],
   examQuestions: [],
-  logs: [],
+  logs: RESULT_DEBUG_RUN?.log ?? [],
   visualEvents: [],
   triggerQueue: [],
   liveStatus: {
@@ -152,17 +166,21 @@ const state: UiState = {
   chainCount: 0,
   scoreAdjustment: 0,
   draftSequence: 0,
-  sharedReport: readSharedReport(),
-  endlessActive: false,
-  endlessYear: 1,
-  scoreThreshold: 750,
+  result: RESULT_DEBUG_RUN,
+  sharedReport: RESULT_DEBUG_ROUTE ? undefined : readSharedReport(),
+  endlessActive: Boolean(RESULT_DEBUG_RUN),
+  endlessYear: RESULT_DEBUG_RUN?.year ?? 1,
+  scoreThreshold: RESULT_DEBUG_RUN?.threshold ?? 750,
   autoPlay: true,
-  speedMultiplier: 1,
-  speedMs: speedDelayMs(1),
+  speedMultiplier: DEFAULT_SPEED_MULTIPLIER,
+  speedMs: speedDelayMs(DEFAULT_SPEED_MULTIPLIER),
+  skipToSettlement: false,
   debugArtifactIds: DEBUG_ROUTE ? readDebugArtifactIds() : [],
-  debugSearch: "",
-  footerOpen: false
+  debugSearchInput: "",
+  debugSearch: ""
 };
+
+let playbackDelayResolvers: Array<() => void> = [];
 
 root.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
@@ -170,7 +188,6 @@ root.addEventListener("click", (event) => {
   const scoreChoice = target.closest<HTMLElement>("[data-score-choice]")?.dataset.scoreChoice;
   const scorePosition = target.closest<HTMLElement>("[data-score-position]")?.dataset.scorePosition;
   const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
-  const speed = target.closest<HTMLElement>("[data-speed]")?.dataset.speed;
   const subject = target.closest<HTMLElement>("[data-subject]")?.dataset.subject as
     | SubjectId
     | undefined;
@@ -185,10 +202,6 @@ root.addEventListener("click", (event) => {
   }
   if (scorePosition !== undefined) {
     resolveScorePosition(Number(scorePosition));
-    return;
-  }
-  if (speed !== undefined) {
-    setSpeedMultiplier(Number(speed));
     return;
   }
   if (action === "skip-draft") {
@@ -208,6 +221,7 @@ root.addEventListener("click", (event) => {
     return;
   }
   if (action === "start-run") {
+    if (state.subjects.length !== 3) return;
     void restartRun(false);
     return;
   }
@@ -217,6 +231,10 @@ root.addEventListener("click", (event) => {
   }
   if (action === "copy-share-link") {
     void copyShareLink();
+    return;
+  }
+  if (action === "download-share-image") {
+    void downloadShareImage();
     return;
   }
   if (action === "add-debug-artifact") {
@@ -239,37 +257,35 @@ root.addEventListener("click", (event) => {
     resetToStart(true);
     return;
   }
-  if (action === "next-question") {
-    state.waitingNext?.();
+  if (action === "reset-result-debug") {
+    resetResultDebug();
     return;
   }
   if (action === "toggle-auto") {
     state.autoPlay = !state.autoPlay;
-    state.waitingNext?.();
+    wakePlaybackDelays();
     render();
     return;
   }
-  if (action === "sprint") {
-    state.autoPlay = true;
-    state.speedMultiplier = 1;
-    state.speedMs = 0;
-    state.sprintExamIndex = state.activeExam?.index;
-    state.waitingNext?.();
-    render();
+  if (action === "cycle-speed") {
+    cycleSpeedMultiplier();
     return;
   }
-  if (action === "copy-feedback") {
-    state.footerOpen = true;
-    void copyIssueTemplate();
+  if (action === "skip-to-settlement") {
+    if (state.phase === "exam" && state.activeExam && !state.examSettlement) {
+      state.skipToSettlement = true;
+      state.autoPlay = true;
+      state.speedMs = 0;
+      wakePlaybackDelays();
+      render();
+    }
+    return;
+  }
+  if (action === "continue-settlement") {
+    state.settlementContinue?.();
     return;
   }
 });
-
-root.addEventListener("toggle", (event) => {
-  const details = event.target as HTMLDetailsElement;
-  if (details.dataset.section !== "footer") return;
-  state.footerOpen = details.open;
-}, true);
 
 root.addEventListener("input", (event) => {
   const input = event.target as HTMLInputElement;
@@ -283,9 +299,22 @@ root.addEventListener("input", (event) => {
     return;
   }
   if (input.dataset.field === "debug-search") {
-    state.debugSearch = input.value;
-    render();
+    state.debugSearchInput = input.value;
   }
+});
+
+root.addEventListener("keydown", (event) => {
+  const input = event.target as HTMLInputElement;
+  if (input.dataset.field !== "debug-search" || event.key !== "Enter") return;
+  event.preventDefault();
+  state.debugSearchInput = input.value;
+  state.debugSearch = input.value;
+  render();
+  requestAnimationFrame(() => {
+    const searchInput = root.querySelector<HTMLInputElement>('[data-field="debug-search"]');
+    searchInput?.focus();
+    searchInput?.setSelectionRange(searchInput.value.length, searchInput.value.length);
+  });
 });
 
 window.addEventListener("resize", syncColumnHeights);
@@ -295,15 +324,16 @@ render();
 function render(): void {
   const intensity = state.activeTrigger?.intensity ?? state.scoreFlash?.intensity ?? "low";
   const activeKind = state.activeTrigger?.kind ?? state.scoreFlash?.kind ?? "chain:step";
+  const pausedClass = state.phase === "exam" && !state.autoPlay ? "playback-paused" : "";
   root.innerHTML = `
-    <div class="app-shell fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""}">
+    <div class="app-shell fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""} ${pausedClass}">
       <main class="paper-field">${renderPhase()}</main>
-      ${renderGlobalTriggerToast()}
       ${renderScoreChoicePrompt()}
       ${renderFooter()}
     </div>
   `;
   syncColumnHeights();
+  void hydrateShareQRCodes();
 }
 
 function syncColumnHeights(): void {
@@ -339,20 +369,26 @@ function renderPhase(): string {
   return renderLoading();
 }
 
-function renderGlobalTriggerToast(): string {
-  if (state.phase === "exam" || !state.activeTrigger) return "";
-  const event = state.activeTrigger;
-  const scoreDelta = event.scoreDelta;
-  const detail = typeof scoreDelta === "number" && Math.abs(scoreDelta) > 0.0001
-    ? `分数 ${formatDelta(scoreDelta)}`
-    : event.effectText || "联动生效";
-  return `
-    <div class="global-trigger-toast toast-${event.tone} toast-${event.intensity}" role="status">
-      <span>${event.replay ? "复触发" : "触发"}</span>
-      <strong>${escapeHtml(event.label)}</strong>
-      <small>${escapeHtml(detail)}</small>
-    </div>
-  `;
+async function hydrateShareQRCodes(): Promise<void> {
+  const link = state.result ? buildShareUrl(state.result) : window.location.href;
+  await hydrateShareQRCodesIn(root, link);
+}
+
+async function hydrateShareQRCodesIn(container: ParentNode, link: string): Promise<void> {
+  const images = [...container.querySelectorAll<HTMLImageElement>("[data-share-qr]")];
+  if (images.length === 0) return;
+  const dataUrl = await QRCode.toDataURL(link, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    width: 120,
+    color: {
+      dark: "#111827",
+      light: "#ffffff"
+    }
+  });
+  images.forEach((image) => {
+    image.src = dataUrl;
+  });
 }
 
 function renderScoreChoicePrompt(): string {
@@ -437,6 +473,7 @@ function renderScorePositionButton(
 }
 
 function renderStart(): string {
+  const canStart = state.subjects.length === 3;
   return `
     <section class="start-screen">
       <div class="start-layout ${DEBUG_ROUTE ? "start-layout-debug" : ""}">
@@ -450,7 +487,7 @@ function renderStart(): string {
             ${renderTicketProfile(state.subjects)}
           </div>
           <div class="start-actions">
-            <button class="primary-button full-width" type="button" data-action="start-run">开始考试</button>
+            <button class="primary-button full-width" type="button" data-action="start-run" ${canStart ? "" : "disabled"}>开始考试</button>
           </div>
         </section>
         <aside class="visual-ticket ${DEBUG_ROUTE ? "answer-card-debug" : ""}">
@@ -486,18 +523,28 @@ function renderDraft(prompt: ChoicePrompt): string {
   const opening = !prompt.discard && state.exams.length === 0 && !state.activeExam && prompt.reason === "开局遗物";
   const rollIndex = Math.min(6, prompt.sequence);
   const selected = state.subjects;
+  const modeLabel = prompt.discard ? "OVERFLOW ARCHIVE" : opening ? `OPENING ROLL ${rollIndex}/6` : "NEXT SUBJECT ROLL";
+  const title = prompt.discard ? "遗物已达上限" : opening ? `请选择你的遗物 ${rollIndex}/6` : "请选择你的遗物";
+  const statusItems = [
+    ["候选", `${prompt.choices.length}`],
+    ["已持有", `${state.artifacts.length}`],
+    ["轮次", prompt.discard ? "作废" : opening ? `${rollIndex}/6` : `${state.exams.length + 1}`]
+  ];
   return `
     <section class="draft-screen ${prompt.discard ? "draft-screen-discard" : ""}">
       <div class="draft-heading">
-        <p class="mono-label">${
-          prompt.discard ? "OVERFLOW DISCARD" : opening ? `OPENING ROLL ${rollIndex}/6` : "NEXT SUBJECT ROLL"
-        }</p>
-        <h1>${prompt.discard ? "遗物已达上限" : opening ? `请选择你的遗物 ${rollIndex}/6` : "请选择你的遗物"}</h1>
+        <div class="draft-heading-main">
+          <p class="mono-label">${modeLabel}</p>
+          <h1>${title}</h1>
+        </div>
+        <div class="draft-status-rail" aria-label="遗物抽取状态">
+          ${statusItems.map(([label, value]) => `<span><small>${label}</small><strong>${value}</strong></span>`).join("")}
+        </div>
         ${prompt.discard ? "<p>选择一件遗物丢弃，为新遗物腾出位置。</p>" : ""}
         ${opening ? renderTicketProfile(selected) : ""}
       </div>
       <div class="draft-grid">
-        ${prompt.choices.map((artifact, index) => renderDraftCard(artifact, index)).join("")}
+        ${prompt.choices.map((artifact, index) => renderDraftCard(artifact, index, prompt.discard)).join("")}
       </div>
       ${prompt.discard ? "" : `<button class="secondary-button skip-draft-button" type="button" data-action="skip-draft">跳过，不拿遗物</button>`}
       ${renderExistingBuild()}
@@ -506,6 +553,7 @@ function renderDraft(prompt: ChoicePrompt): string {
 }
 
 function renderTicketProfile(selected: SubjectId[]): string {
+  const selectedLabels = selected.map((subject) => SUBJECT_LABELS[subject]).join(" / ");
   return `
     <div class="ticket-profile">
       <label class="player-name-field">
@@ -521,11 +569,15 @@ function renderTicketProfile(selected: SubjectId[]): string {
       </label>
       <div class="subject-picker" aria-label="选科">
         <div class="subject-picker-head">
-          <span>选科</span>
-          <strong>${subjectOrderLabels().join(" / ")}</strong>
+          <span>选科 <em>${selected.length}/3</em></span>
+          <strong>${escapeHtml(selectedLabels)}</strong>
         </div>
         <div class="subject-chip-row">
-          ${ELECTIVE_SUBJECTS.map((subject) => renderSubjectChip(subject, selected.includes(subject))).join("")}
+          ${ELECTIVE_SUBJECTS.map((subject) => renderSubjectChip(
+            subject,
+            selected.includes(subject),
+            !selected.includes(subject) && selected.length >= 3
+          )).join("")}
         </div>
       </div>
     </div>
@@ -568,7 +620,7 @@ function renderDebugBuilder(): string {
         <span>搜索遗物</span>
         <input
           data-field="debug-search"
-          value="${escapeAttr(state.debugSearch)}"
+          value="${escapeAttr(state.debugSearchInput)}"
           placeholder="名称 / 描述 / tag / id"
           autocapitalize="off"
           autocorrect="off"
@@ -610,24 +662,37 @@ function findArtifact(id: string): ArtifactConfig | undefined {
   return (LOCAL_ARTIFACTS as readonly ArtifactConfig[]).find((artifact) => artifact.id === id);
 }
 
-function renderSubjectChip(subject: SubjectId, active: boolean): string {
+function renderSubjectChip(subject: SubjectId, active: boolean, disabled: boolean): string {
   return `
-    <button type="button" class="${active ? "subject-chip active" : "subject-chip"}" data-subject="${subject}">
+    <button
+      type="button"
+      class="${active ? "subject-chip active" : "subject-chip"}"
+      data-subject="${subject}"
+      aria-pressed="${active}"
+      ${disabled ? "disabled" : ""}
+    >
       ${SUBJECT_LABELS[subject]}
     </button>
   `;
 }
 
-function renderDraftCard(artifact: ArtifactConfig, index: number): string {
+function renderDraftCard(artifact: ArtifactConfig, index: number, discard = false): string {
+  const code = String(index + 1).padStart(2, "0");
   return `
-    <button class="draft-card rarity-${rarityClass(artifact.rarity)}" type="button" data-choice="${index}">
+    <button class="draft-card rarity-${rarityClass(artifact.rarity)} ${discard ? "discard-card" : ""}" type="button" data-choice="${index}">
+      <span class="draft-card-watermark">${code}</span>
       <div class="draft-card-top">
+        <span class="draft-index">档案 ${code}</span>
         <div class="term-corner">
           <span class="rarity">${rarityLabel(artifact.rarity)}</span>
         </div>
       </div>
       <h2>${escapeHtml(artifact.name)}</h2>
       <p>${escapeHtml(artifact.description)}</p>
+      <div class="draft-card-footer">
+        <span>${escapeHtml(artifact.id)}</span>
+        <strong>${discard ? "作废出档" : "盖章入档"}</strong>
+      </div>
     </button>
   `;
 }
@@ -663,12 +728,6 @@ function renderExam(): string {
           ${renderQuestionCard(exam, question)}
           ${renderTriggerStage()}
         </div>
-        <div class="exam-controls">
-          <button class="secondary-button" type="button" data-action="toggle-auto">${state.autoPlay ? "暂停自动" : "继续自动"}</button>
-          ${renderSpeedControl()}
-          <button class="secondary-button" type="button" data-action="sprint">快速跳过</button>
-          <button class="secondary-button" type="button" data-action="restart">重开</button>
-        </div>
       </section>
       <section class="support-drawers" aria-label="次要信息">
         ${renderStateDrawer(exam, pending)}
@@ -680,24 +739,6 @@ function renderExam(): string {
   `;
 }
 
-function renderSpeedControl(): string {
-  return `
-    <div class="speed-control" role="group" aria-label="加速">
-      <span>加速</span>
-      ${SPEED_MULTIPLIERS.map(
-        (speed) => `
-          <button
-            class="speed-button ${state.speedMultiplier === speed ? "active" : ""}"
-            type="button"
-            data-speed="${speed}"
-            aria-pressed="${state.speedMultiplier === speed}"
-          >${speed}x</button>
-        `
-      ).join("")}
-    </div>
-  `;
-}
-
 function renderExamSettlement(): string {
   const exam = state.examSettlement;
   if (!exam) return "";
@@ -706,24 +747,29 @@ function renderExamSettlement(): string {
   const examMultiplier = exam.examMultiplier ?? 1;
   const examPostBonus = exam.examPostBonus ?? 0;
   const multipliedScore = Math.round(rawScore * examMultiplier * 100) / 100;
+  const examScoreText = formatNumber(exam.score);
+  const totalScoreText = formatNumber(total);
+  const hasPostBonus = Math.abs(examPostBonus) > 0.0001;
+  const bonusLabel = examPostBonus >= 0 ? "结算加分" : "结算扣分";
   const bonusNode = Math.abs(examPostBonus) > 0.0001
     ? `
-          <i>+</i>
+          <i>${examPostBonus >= 0 ? "+" : "-"}</i>
           <span class="settlement-bonus">
-            <b>结算加分</b>
-            <strong>${formatNumber(examPostBonus)}</strong>
+            <b>${bonusLabel}</b>
+            <strong>${formatNumber(Math.abs(examPostBonus))}</strong>
           </span>
       `
     : "";
   const floats = [
-    `+${exam.score}`,
+    formatDelta(exam.score),
     `原始分 ${formatNumber(rawScore)}`,
     `得分倍率 x${formatNumber(examMultiplier)}`,
     `=${formatNumber(multipliedScore)}`,
-    `${SUBJECT_LABELS[exam.subject]} ${exam.score}`,
+    ...(hasPostBonus ? [`最终修正 ${formatDelta(examPostBonus)}`] : []),
+    `${SUBJECT_LABELS[exam.subject]} ${examScoreText}`,
     `答对 ${exam.correctCount}`,
     `答错 ${exam.wrongCount}`,
-    `总分 ${total}`
+    `总分 ${totalScoreText}`
   ];
   return `
     <section class="exam-settlement-layer" role="dialog" aria-modal="true">
@@ -733,7 +779,7 @@ function renderExamSettlement(): string {
       <article class="settlement-card exam-paper">
         <div class="settlement-card-head">
           <span>${SUBJECT_LABELS[exam.subject]}</span>
-          <strong>${exam.score}</strong>
+          <strong>${examScoreText}</strong>
         </div>
         <div class="settlement-formula" aria-label="本场结算公式">
           <span>
@@ -754,19 +800,20 @@ function renderExamSettlement(): string {
         </div>
         <div class="settlement-score-shell">
           <span class="settlement-light-burst" aria-hidden="true"></span>
-          <div class="settlement-score ${exam.score > SUBJECT_EXAM_RULES[exam.subject].fullScore ? "over-score" : ""}">${exam.score}</div>
+          <div class="settlement-score ${exam.score > SUBJECT_EXAM_RULES[exam.subject].fullScore ? "over-score" : ""}">${examScoreText}</div>
         </div>
         <div class="settlement-stat-grid">
           <div><span>答对</span><strong>${exam.correctCount}</strong></div>
           <div><span>答错</span><strong>${exam.wrongCount}</strong></div>
-          <div><span>总分</span><strong>${total}</strong></div>
+          <div><span>总分</span><strong>${totalScoreText}</strong></div>
         </div>
         <div class="settlement-subject-strip">
           ${state.exams
-            .map((item) => `<span>${SUBJECT_LABELS[item.subject]} <strong>${item.score}</strong></span>`)
+            .map((item) => `<span>${SUBJECT_LABELS[item.subject]} <strong>${formatNumber(item.score)}</strong></span>`)
             .join("")}
         </div>
-        <button class="primary-button" type="button" data-action="next-question">开始考试</button>
+        <div class="settlement-card-link">whitegiver-plus.github.io/GaokaoArtifact</div>
+        <button class="primary-button" type="button" data-action="continue-settlement">继续考试</button>
       </article>
     </section>
   `;
@@ -795,7 +842,7 @@ function renderPaperStatusTile(label: string, value: string, key: keyof LiveExam
     : "cool";
   return `
     <div class="paper-status-tile status-${key} heat-${heat} ${delta ? `status-pulse intensity-${intensity}` : ""}">
-      ${delta ? `<b class="status-delta">${formatDelta(delta.value, key)}</b>` : ""}
+      ${delta ? `<b class="status-delta delta-${intensity}">${formatDelta(delta.value, key)}</b>` : ""}
       <span>${label}</span>
       <strong>${value}</strong>
       <small>${delta ? `${formatNumber(delta.before)} -> ${formatNumber(delta.after)}` : idleText}</small>
@@ -807,9 +854,16 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
   const rule = SUBJECT_EXAM_RULES[exam.subject];
   const done = Math.min(rule.questionCount, exam.questionIndex);
   const total = state.exams.reduce((sum, item) => sum + item.score, 0) + exam.score + state.scoreAdjustment;
+  const totalScoreText = formatNumber(total);
+  const examScoreText = formatNumber(exam.score);
   const progress = Math.min(100, (done / rule.questionCount) * 100);
   const trigger = state.activeTrigger;
   const flash = trigger ?? state.scoreFlash;
+  const scoreFlashClass = flash
+    ? flash.settling
+      ? `score-settling settle-${flash.intensity} ${flash.scoreBanking ? "score-banking" : ""}`
+      : `score-flash flash-${flash.intensity}`
+    : "";
   return `
     <div class="exam-paper-header compact-paper-header">
       <span class="secret-line">★ 考试状态 ★</span>
@@ -817,16 +871,17 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
         <span>准考证号 ${escapeHtml(state.seed.slice(0, 10).toUpperCase())}</span>
         <i></i>
       </div>
+      ${renderExamToolDock()}
       <div class="paper-status-layout" aria-label="当前考试状态">
         <div class="paper-title-block compact-paper-title">
           <p class="mono-label">AUTO EXAM STATUS</p>
           <h2>${SUBJECT_LABELS[exam.subject]}</h2>
           <small>第 ${exam.index + 1}/${subjectOrder().length} 场 · 答题点 ${done}/${rule.questionCount} · 剩余 ${pending}</small>
         </div>
-        <div class="paper-score-total score-box-total ${flash ? `score-flash flash-${flash.intensity}` : ""}">
-          <em class="paper-total-corner">总分 ${Math.round(total)}</em>
+        <div class="paper-score-total score-box-total ${scoreFlashClass}">
+          <em class="paper-total-corner">总分 ${totalScoreText}</em>
           <span>分数</span>
-          <strong class="${exam.score > rule.fullScore ? "over-score" : ""}">${Math.round(exam.score)}</strong>
+          <strong class="${exam.score > rule.fullScore ? "over-score" : ""}">${examScoreText}</strong>
           <small>${SUBJECT_LABELS[exam.subject]}当前分</small>
         </div>
         <div class="paper-status-grid">
@@ -836,15 +891,6 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
           ${renderPaperStatusTile("体力", `${formatNumber(state.liveStatus.stamina)}%`, "stamina", `基础 ${formatNumber(state.liveStatus.baseStamina)}%`)}
         </div>
       </div>
-      ${
-        trigger
-          ? `<div class="paper-trigger-banner status-trigger-banner banner-${trigger.tone}">
-              <span>${trigger.replay ? "复触发" : "触发"}</span>
-              <strong>${escapeHtml(trigger.label)}</strong>
-              <small>${escapeHtml(trigger.effectText || "联动生效")}</small>
-            </div>`
-          : ""
-      }
       <div class="paper-progress-row">
         <div class="budget-bar" aria-label="答题点进度"><span style="width:${progress}%"></span></div>
         <div class="budget-text">
@@ -856,10 +902,34 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
   `;
 }
 
+function renderExamToolDock(): string {
+  const pauseLabel = state.autoPlay ? "暂停自动" : "继续自动";
+  return `
+    <div class="exam-tool-dock" aria-label="考试控制">
+      <button class="exam-icon-button ${state.autoPlay ? "is-running" : "is-paused"}" type="button" data-action="toggle-auto" aria-label="${pauseLabel}" title="${pauseLabel}">
+        <span class="geo-icon ${state.autoPlay ? "geo-pause" : "geo-play"}" aria-hidden="true"></span>
+      </button>
+      <button class="exam-icon-button is-restart" type="button" data-action="restart" aria-label="重开" title="重开">
+        <span class="geo-icon geo-restart" aria-hidden="true"></span>
+      </button>
+      <button class="exam-icon-button is-speed speed-tier-${state.speedMultiplier}" type="button" data-action="cycle-speed" aria-label="加速 ${state.speedMultiplier}x" title="加速 ${state.speedMultiplier}x">
+        <span class="speed-pips" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      </button>
+      <button class="exam-icon-button is-skip" type="button" data-action="skip-to-settlement" aria-label="跳到改分或本科结算" title="跳到改分或本科结算">
+        <span class="geo-icon geo-skip" aria-hidden="true"></span>
+      </button>
+    </div>
+  `;
+}
+
 function renderQuestionCard(exam: NonNullable<UiState["activeExam"]>, question?: QuestionLog): string {
   const rule = SUBJECT_EXAM_RULES[exam.subject];
   const resultClass = question ? (question.correct ? "result-success" : "result-fail") : "result-pending";
   const titleIndex = Math.max(1, exam.questionIndex);
+  const staminaText = question
+    ? `${formatNumber(question.staminaBefore)}->${formatNumber(question.staminaAfter)}`
+    : "--";
+  const gainedText = question ? formatNumber(question.scoreGained) : "0";
   return `
     <article class="question-card ${resultClass}">
       <div class="scanline"></div>
@@ -877,8 +947,8 @@ function renderQuestionCard(exam: NonNullable<UiState["activeExam"]>, question?:
         ${Array.from({ length: rule.questionCount }, (_, index) => renderAnswerDot(index + 1, rule.pointsPerQuestion)).join("")}
       </div>
       <div class="tag-row large">
-        <span>体力 ${question ? `${question.staminaBefore}->${question.staminaAfter}` : "--"}</span>
-        <span>本题 ${question?.scoreGained ?? 0} 分</span>
+        <span>体力 ${staminaText}</span>
+        <span>本题 ${gainedText} 分</span>
       </div>
       <div class="result-stamp">${question ? (question.correct ? "成功" : "失误") : "等待判定"}</div>
     </article>
@@ -893,7 +963,7 @@ function renderAnswerDot(index: number, pointsPerQuestion: number): string {
   }
   const cls = logged.correct ? "answer-success" : "answer-fail";
   const label = logged.correct ? "成功" : "失误";
-  return `<span class="${cls}${active}" data-index="${index}" title="第 ${index} 题：${label} ${logged.scoreGained}/${pointsPerQuestion}"></span>`;
+  return `<span class="${cls}${active}" data-index="${index}" title="第 ${index} 题：${label} ${formatNumber(logged.scoreGained)}/${pointsPerQuestion}"></span>`;
 }
 
 function renderTriggerOverlay(): string {
@@ -901,16 +971,23 @@ function renderTriggerOverlay(): string {
   if (!event) {
     return `<div class="trigger-overlay" aria-hidden="true"></div>`;
   }
-  const delta = event.deltas?.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
+  const delta = [...(event.deltas ?? [])].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
   const scoreDelta = event.scoreDelta;
-  const detail = typeof scoreDelta === "number" && Math.abs(scoreDelta) > 0.0001
+  const detail = event.detailText ? escapeHtml(event.detailText) : typeof scoreDelta === "number" && Math.abs(scoreDelta) > 0.0001
     ? `分数 ${formatDelta(scoreDelta)}`
-    : delta ? `${escapeHtml(delta.label)} ${formatDelta(delta.value, delta.key)}` : "";
+    : delta ? `${escapeHtml(delta.label)} ${formatDelta(delta.value, delta.key)}` : event.effectText ? escapeHtml(event.effectText) : "";
+  const label = event.settling && event.scoreBanking && typeof scoreDelta === "number"
+    ? `入账 ${formatDelta(scoreDelta)}`
+    : event.label;
+  const ledger = event.scoreBanking && event.examScoreBefore !== undefined && event.examScoreAfter !== undefined
+    ? `<em>科目分 ${formatNumber(event.examScoreBefore)} -> ${formatNumber(event.examScoreAfter)}</em>`
+    : "";
   return `
     <div class="trigger-overlay" aria-hidden="true">
-      <span class="float-event float-${event.tone} float-${event.intensity}">
-        <strong>${escapeHtml(event.label)}</strong>
+      <span class="float-event float-${event.tone} float-${event.intensity} kind-${cssSafeKind(event.kind)} ${event.scoreBanking ? "float-banking" : ""} ${event.settling ? "float-settling" : ""}">
+        <strong>${escapeHtml(label)}</strong>
         ${detail ? `<small>${detail}</small>` : ""}
+        ${ledger}
       </span>
     </div>
   `;
@@ -995,7 +1072,7 @@ function renderStateDrawer(exam: NonNullable<UiState["activeExam"]>, pending: nu
           .map((subject, index) => {
             const done = state.exams.find((item) => item.subject === subject);
             const active = exam.subject === subject;
-            const score = done ? done.score : active ? Math.round(exam.score) : "--";
+            const score = done ? formatNumber(done.score) : active ? formatNumber(exam.score) : "--";
             return `<div class="subject-row ${active ? "active" : ""} ${done ? "done" : ""}"><span>${index + 1}. ${SUBJECT_LABELS[subject]}</span><strong>${score}</strong></div>`;
           })
           .join("")}
@@ -1017,10 +1094,10 @@ function renderStateDrawer(exam: NonNullable<UiState["activeExam"]>, pending: nu
 function renderTermsDrawer(): string {
   return `
     <details class="mobile-drawer terms-drawer">
-      <summary><span>准考证词条库</span><strong>${state.artifacts.length} 条</strong></summary>
+      <summary><span>遗物列表</span><strong>${state.artifacts.length} 条</strong></summary>
       <div class="panel-title">
         <p class="mono-label">ADMISSION TICKET</p>
-        <h2>准考证词条</h2>
+        <h2>遗物列表</h2>
       </div>
       <div class="term-list">
         ${state.artifacts.map((artifact) => renderTermCard(artifact)).join("")}
@@ -1074,11 +1151,11 @@ function renderHelpDoc(): string {
       </section>
       <section>
         <h3>无尽模式</h3>
-        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，通关门槛从 750 开始每年 x1.5。</p>
+        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，录取线从 750 开始每年 x3。</p>
       </section>
       <section>
         <h3>操作</h3>
-        <p>自动模式会连续判题；暂停自动后可点击“继续自动”恢复；加速可切换 1x、2x、4x、8x 播放速度。</p>
+        <p>自动模式会连续判题；暂停自动后可点击“继续自动”恢复；加速默认 2x，可切换 1x、2x、4x、8x 播放速度。</p>
       </section>
     </div>
   `;
@@ -1115,34 +1192,42 @@ function logTone(line: string): "good" | "warn" | "wild" {
 }
 
 function renderResult(result: RunResult): string {
-  const overflow = Math.max(0, result.totalScore - 750);
   const passedThreshold = result.totalScore > result.threshold;
   const nextThreshold = nextEndlessThreshold(result.threshold);
   const title = resultTitle(result.totalScore);
+  const totalScoreText = formatNumber(result.totalScore);
+  const thresholdText = formatNumber(result.threshold);
+  const nextThresholdText = formatNumber(nextThreshold);
   return `
     <section class="result-screen">
       <div class="result-card">
         <p class="mono-label">${state.endlessActive ? `ENDLESS YEAR ${result.year}` : "FINAL SCORE"}</p>
-        <div class="final-score ${result.totalScore > 750 ? "over-score" : ""}">${result.totalScore}</div>
+        <div class="final-score ${result.totalScore > 750 ? "over-score" : ""}">${totalScoreText}</div>
         <h1>${title}</h1>
-        <p>${escapeHtml(state.playerName || "考生")} 的六科已交卷。你的准考证上共有 ${state.artifacts.length} 条词条，当前门槛 ${result.threshold} 分，溢出分 ${overflow}。</p>
+        <p>${escapeHtml(state.playerName || "考生")} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件遗物。</p>
         <div class="endless-panel ${passedThreshold ? "passed" : "failed"}">
           <div>
-            <span>${passedThreshold ? "无尽模式可继续" : "本轮战报封存"}</span>
-            <strong>${passedThreshold ? `下一年门槛 ${nextThreshold}` : `未超过 ${result.threshold}`}</strong>
+            <span>${passedThreshold ? "下一年录取线" : "本轮录取线"}</span>
+            <strong>${passedThreshold ? nextThresholdText : thresholdText}</strong>
           </div>
-          <p>${passedThreshold ? "进入下一年后，保留当前遗物组；每科开考前获得一次 4 选 1，分数门槛 x1.5。" : "超过 750 分后才可进入无尽模式；无尽年需要继续超过当年门槛。"}</p>
+          <p>${passedThreshold ? "进入下一年后保留当前遗物组；每科开考前获得一次 4 选 1。" : "达到本轮录取线后可进入下一年。"}</p>
         </div>
-        ${renderShareCard(result, title, overflow)}
+        ${renderShareCard(result, title)}
+        ${renderResultArtifacts(result)}
         <div class="result-subjects">
           ${result.exams
-            .map((exam) => `<div><span>${SUBJECT_LABELS[exam.subject]}</span><strong>${exam.score}</strong></div>`)
+            .map((exam) => `<div><span>${SUBJECT_LABELS[exam.subject]}</span><strong>${formatNumber(exam.score)}</strong></div>`)
             .join("")}
         </div>
         <div class="result-actions">
-          ${passedThreshold ? `<button class="primary-button" type="button" data-action="continue-endless">进入第 ${result.year + 1} 年</button>` : ""}
+          ${passedThreshold && !RESULT_DEBUG_ROUTE ? `<button class="primary-button" type="button" data-action="continue-endless">进入第 ${result.year + 1} 年</button>` : ""}
           <button class="secondary-button" type="button" data-action="copy-share-link">复制战报链接</button>
-          <button class="secondary-button" type="button" data-action="restart">重新开始</button>
+          <button class="secondary-button" type="button" data-action="download-share-image">下载战报图</button>
+          ${
+            RESULT_DEBUG_ROUTE
+              ? `<button class="secondary-button" type="button" data-action="reset-result-debug">重置示例</button>`
+              : `<button class="secondary-button" type="button" data-action="restart">重新开始</button>`
+          }
         </div>
       </div>
       ${renderLogStandalone()}
@@ -1150,35 +1235,37 @@ function renderResult(result: RunResult): string {
   `;
 }
 
-function renderShareCard(result: RunResult, title: string, overflow: number): string {
+function renderShareCard(result: RunResult, title: string): string {
+  const totalScoreText = formatNumber(result.totalScore);
+  const thresholdText = formatNumber(result.threshold);
   return `
     <section class="share-card-preview" aria-label="分享卡片预览">
       <div class="share-card-paper">
         <div class="share-card-head">
-          <div><span class="mono-label">REPORT CARD</span><strong>准考证战报</strong></div>
-          <span>${result.year > 1 ? `YEAR ${result.year}` : overflow > 0 ? `OVER +${overflow}` : "本地战报"}</span>
+          <div><span class="mono-label">REPORT CARD</span><strong>whitegiver-plus.github.io/GaokaoArtifact</strong></div>
+          <span>${result.year > 1 ? `YEAR ${result.year}` : "本地战报"}</span>
         </div>
         <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(state.playerName || "考生")}</strong></div>
-        <div class="share-card-score ${result.totalScore > 750 ? "over-score" : ""}">${result.totalScore}</div>
+        <div class="share-card-score-row">
+          <div class="share-card-score ${result.totalScore > 750 ? "over-score" : ""}">${totalScoreText}</div>
+          <div class="share-card-qr-box">
+            <img class="share-card-qr" data-share-qr alt="战报二维码" />
+          </div>
+        </div>
         <h2>${title}</h2>
         <div class="share-card-meta">
           <span>SEED ${escapeHtml(result.seed)}</span>
-          <span>门槛 ${result.threshold}</span>
+          <span>录取线 ${thresholdText}</span>
         </div>
         <div class="share-card-hand"><span>无尽年</span><strong>${result.year}</strong></div>
         <div class="share-card-subjects">
           ${result.exams
-            .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${exam.score}</strong></span>`)
+            .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`)
             .join("")}
         </div>
         <div class="share-card-terms">
-          ${state.artifacts
-            .slice(-6)
-            .reverse()
-            .map(
-              (artifact) =>
-                `<span class="rarity-text-${rarityClass(artifact.rarity)}">${escapeHtml(artifact.name)}</span>`
-            )
+          ${result.artifactNames
+            .map((name, index) => renderArtifactChip(name, result.artifactIds[index]))
             .join("")}
         </div>
       </div>
@@ -1186,27 +1273,54 @@ function renderShareCard(result: RunResult, title: string, overflow: number): st
   `;
 }
 
+function renderResultArtifacts(result: RunResult): string {
+  if (result.artifactNames.length === 0) return "";
+  return `
+    <section class="result-artifacts" aria-label="最终遗物清单">
+      <div class="result-artifacts-head">
+        <span>遗物清单</span>
+        <strong>${result.artifactNames.length} 条</strong>
+      </div>
+      <div class="result-artifact-list">
+        ${result.artifactNames.map((name, index) => renderArtifactChip(name, result.artifactIds[index])).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderArtifactChip(name: string, artifactId?: string): string {
+  const artifact = artifactId ? findArtifact(artifactId) : undefined;
+  const className = artifact ? ` class="rarity-text-${rarityClass(artifact.rarity)}"` : "";
+  return `<span${className}>${escapeHtml(name)}</span>`;
+}
+
 function renderSharedReport(report: SharedReport): string {
-  const overflow = Math.max(0, report.score - 750);
+  const scoreText = formatNumber(report.score);
+  const thresholdText = formatNumber(report.threshold);
   return `
     <section class="result-screen shared-result-screen">
       <div class="result-card">
         <p class="mono-label">SHARED REPORT</p>
-        <div class="final-score ${report.score > 750 ? "over-score" : ""}">${report.score}</div>
-        <h1>${escapeHtml(report.title)}</h1>
-        <p>${escapeHtml(report.playerName)} 的分享战报。第 ${report.year} 年，门槛 ${report.threshold} 分，溢出分 ${overflow}。</p>
+        <div class="final-score ${report.score > 750 ? "over-score" : ""}">${scoreText}</div>
+        <h1>${escapeHtml(resultTitle(report.score))}</h1>
+        <p>${escapeHtml(report.playerName)} 的分享战报。第 ${report.year} 年，收录 ${report.artifacts.length} 件遗物。</p>
         <section class="share-card-preview" aria-label="分享战报">
           <div class="share-card-paper">
             <div class="share-card-head">
-              <div><span class="mono-label">REPORT CARD</span><strong>准考证战报</strong></div>
+              <div><span class="mono-label">REPORT CARD</span><strong>whitegiver-plus.github.io/GaokaoArtifact</strong></div>
               <span>YEAR ${report.year}</span>
             </div>
             <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(report.playerName)}</strong></div>
-            <div class="share-card-score ${report.score > 750 ? "over-score" : ""}">${report.score}</div>
-            <h2>${escapeHtml(report.title)}</h2>
+            <div class="share-card-score-row">
+              <div class="share-card-score ${report.score > 750 ? "over-score" : ""}">${scoreText}</div>
+              <div class="share-card-qr-box">
+                <img class="share-card-qr" data-share-qr alt="战报二维码" />
+              </div>
+            </div>
+            <h2>${escapeHtml(resultTitle(report.score))}</h2>
             <div class="share-card-meta">
               <span>SEED ${escapeHtml(report.seed)}</span>
-              <span>门槛 ${report.threshold}</span>
+              <span>录取线 ${thresholdText}</span>
             </div>
             <div class="share-card-subjects">
               ${report.subjects
@@ -1226,20 +1340,15 @@ function renderSharedReport(report: SharedReport): string {
   `;
 }
 
-function resultTitle(score: number): string {
-  if (score >= 1000) return "满分已经失去行政意义";
-  if (score > 850) return "招生办正在刷新页面";
-  if (score > 750) return "分数溢出了答题卡";
-  if (score > 620) return "稳定上岸，但准考证看起来不太合法";
-  return "命题组还活着";
+function resultTitle(_score: number): string {
+  return "高考战报";
 }
 
 function nextEndlessThreshold(threshold: number): number {
-  return Math.ceil(threshold * 1.5);
+  return Math.ceil(threshold * 3);
 }
 
 function renderFooter(): string {
-  const issueUrl = buildIssueUrl();
   const notice = state.footerNotice
     ? `<div class="footer-notice" role="status">${escapeHtml(state.footerNotice)}</div>`
     : "";
@@ -1251,74 +1360,210 @@ function renderFooter(): string {
           ${renderHelpDoc()}
         </div>
       </details>
-      <details data-section="footer" ${state.footerOpen ? "open" : ""}>
-        <summary><span>发布信息</span><strong>反馈 / 赞赏 / 排名</strong></summary>
-        <div class="footer-grid">
-          <a class="footer-option" href="${escapeAttr(issueUrl)}" target="_blank" rel="noreferrer">
-            <strong>提交 GitHub Issue</strong>
-            <span>自动带上 seed、阶段、成绩、遗物和最近日志，方便复现。</span>
-          </a>
-          <button class="footer-option" type="button" data-action="copy-feedback">
-            <strong>复制 Issue 模板</strong>
-            <span>GitHub 打不开时，先复制模板再手动粘贴。</span>
-          </button>
-          <div class="footer-roadmap">
-            <span>排名接口可接 /api/leaderboard，提交内容建议同时附上战报截图。</span>
-            <span>赞赏入口保留为配置项；没有收款码时不显示空按钮。</span>
-          </div>
-          ${notice}
-        </div>
-      </details>
+      ${notice}
     </footer>
   `;
-}
-
-async function copyIssueTemplate(): Promise<void> {
-  const text = buildIssueBody();
-  try {
-    await navigator.clipboard.writeText(text);
-    showFooterNotice("Issue 模板已复制，可以直接粘贴到 GitHub。");
-  } catch {
-    showFooterNotice("浏览器禁止剪贴板写入，请直接点击提交 GitHub Issue。");
-  }
-}
-
-function buildIssueUrl(): string {
-  const params = new URLSearchParams({
-    title: `[反馈] ${state.phase} / seed ${state.seed}`,
-    body: buildIssueBody()
-  });
-  return `https://github.com/WhiteGiver-Plus/GaokaoArtifact/issues/new?${params.toString()}`;
 }
 
 async function copyShareLink(): Promise<void> {
   const result = state.result;
   if (!result) return;
   const link = buildShareUrl(result);
+  const text = buildShareText(result, link);
   try {
-    await navigator.clipboard.writeText(link);
-    showFooterNotice("战报链接已复制。");
+    await navigator.clipboard.writeText(text);
+    showFooterNotice("战报分享文案已复制。");
   } catch {
-    showFooterNotice(link);
+    showFooterNotice(text);
   }
 }
 
+function buildShareText(result: RunResult, link: string): string {
+  return `我在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分。${link}`;
+}
+
+async function downloadShareImage(): Promise<void> {
+  const result = state.result;
+  if (!result) return;
+  try {
+    const link = buildShareUrl(result);
+    const dataUrl = await createShareImageDataUrl(result, link);
+    const anchor = document.createElement("a");
+    anchor.href = dataUrl;
+    anchor.download = `gaokao-report-${sanitizeFilename(result.seed)}.png`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    showFooterNotice("战报图已下载。");
+  } catch {
+    showFooterNotice("战报图生成失败，请先复制战报链接。");
+  }
+}
+
+async function createShareImageDataUrl(result: RunResult, link: string): Promise<string> {
+  const source = root.querySelector<HTMLElement>(".share-card-paper");
+  if (!source) throw new Error("Share card is unavailable.");
+  const frame = document.createElement("div");
+  frame.className = "share-card-download-capture";
+  const clone = source.cloneNode(true) as HTMLElement;
+  frame.append(clone);
+  document.body.append(frame);
+  try {
+    await hydrateShareQRCodesIn(frame, link);
+    await waitForImages(clone);
+    return await toPng(clone, {
+      backgroundColor: "#f2f5f9",
+      cacheBust: true,
+      pixelRatio: 2
+    });
+  } finally {
+    frame.remove();
+  }
+}
+
+function waitForImages(element: HTMLElement): Promise<void> {
+  const images = [...element.querySelectorAll<HTMLImageElement>("img")];
+  return Promise.all(
+    images.map((image) => {
+      if (image.complete) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener("error", () => resolve(), { once: true });
+      });
+    })
+  ).then(() => undefined);
+}
+
+function drawReportCanvas(
+  context: CanvasRenderingContext2D,
+  result: RunResult,
+  qrImage: HTMLImageElement,
+  width: number,
+  height: number
+): void {
+  const title = resultTitle(result.totalScore);
+  const margin = 58;
+  context.fillStyle = "#f2f5f9";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#ffffff";
+  drawRoundRect(context, margin, margin, width - margin * 2, height - margin * 2, 18);
+  context.fill();
+  context.strokeStyle = "#111827";
+  context.lineWidth = 4;
+  context.stroke();
+
+  context.fillStyle = "rgba(217, 52, 43, 0.12)";
+  context.fillRect(margin, margin, 34, height - margin * 2);
+  context.fillStyle = "#111827";
+  context.font = "900 30px 'Microsoft YaHei', sans-serif";
+  context.fillText("whitegiver-plus.github.io/GaokaoArtifact", 110, 128);
+  context.font = "900 18px Consolas, monospace";
+  context.fillStyle = "#6b7280";
+  context.fillText(`SEED ${result.seed}`, 110, 164);
+
+  context.drawImage(qrImage, width - 250, 204, 142, 142);
+
+  context.font = "950 142px Consolas, monospace";
+  context.fillStyle = "#111827";
+  context.fillText(formatNumber(result.totalScore), 108, 330);
+  context.font = "900 54px 'Microsoft YaHei', sans-serif";
+  context.fillText(title, 112, 410);
+
+  context.font = "800 26px 'Microsoft YaHei', sans-serif";
+  context.fillStyle = "#374151";
+  context.fillText(`${state.playerName || "考生"} · 第 ${result.year} 年 · 录取线 ${formatNumber(result.threshold)}`, 112, 470);
+
+  let y = 545;
+  context.font = "900 24px 'Microsoft YaHei', sans-serif";
+  context.fillStyle = "#111827";
+  context.fillText("科目分数", 112, y);
+  y += 28;
+  const subjectWidth = 280;
+  result.exams.forEach((exam, index) => {
+    const x = 112 + (index % 3) * (subjectWidth + 26);
+    const rowY = y + Math.floor(index / 3) * 76;
+    drawPill(context, x, rowY, subjectWidth, 52, `${SUBJECT_LABELS[exam.subject]}  ${formatNumber(exam.score)}`);
+  });
+
+  y += Math.ceil(result.exams.length / 3) * 76 + 44;
+  context.font = "900 24px 'Microsoft YaHei', sans-serif";
+  context.fillStyle = "#111827";
+  context.fillText(`遗物清单 ${result.artifactNames.length} 件`, 112, y);
+  y += 28;
+  result.artifactNames.forEach((name, index) => {
+    const x = 112 + (index % 3) * 296;
+    const rowY = y + Math.floor(index / 3) * 50;
+    drawPill(context, x, rowY, 270, 34, name, 19);
+  });
+}
+
+function drawPill(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  text: string,
+  fontSize = 22
+): void {
+  context.fillStyle = "#ffffff";
+  drawRoundRect(context, x, y, width, height, 12);
+  context.fill();
+  context.strokeStyle = "#cfd6e5";
+  context.lineWidth = 2;
+  context.stroke();
+  context.fillStyle = "#111827";
+  context.font = `900 ${fontSize}px 'Microsoft YaHei', sans-serif`;
+  drawFittedText(context, text, x + 14, y + Math.round(height / 2 + fontSize / 2 - 5), width - 28);
+}
+
+function drawFittedText(context: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number): void {
+  let value = text;
+  while (value.length > 1 && context.measureText(value).width > maxWidth) {
+    value = `${value.slice(0, -2)}…`;
+  }
+  context.fillText(value, x, y);
+}
+
+function drawRoundRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+): void {
+  const r = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + r, y);
+  context.lineTo(x + width - r, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + r);
+  context.lineTo(x + width, y + height - r);
+  context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  context.lineTo(x + r, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - r);
+  context.lineTo(x, y + r);
+  context.quadraticCurveTo(x, y, x + r, y);
+  context.closePath();
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function sanitizeFilename(value: string): string {
+  return value.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "report";
+}
+
 function buildShareUrl(result: RunResult): string {
-  const report: SharedReport = {
-    playerName: state.playerName || "考生",
-    seed: result.seed,
-    score: result.totalScore,
-    year: result.year,
-    threshold: result.threshold,
-    title: resultTitle(result.totalScore),
-    subjects: result.exams.map((exam) => ({
-      label: SUBJECT_LABELS[exam.subject],
-      score: String(exam.score)
-    })),
-    artifacts: state.artifacts.slice(-6).reverse().map((artifact) => artifact.name)
-  };
-  const params = new URLSearchParams({ report: encodeShareReport(report) });
+  const params = new URLSearchParams({ r: encodeCompactShareReport(result) });
   const url = new URL(window.location.href);
+  url.pathname = sharePathname(url.pathname);
   url.search = params.toString();
   url.hash = "";
   return url.toString();
@@ -1326,7 +1571,10 @@ function buildShareUrl(result: RunResult): string {
 
 function readSharedReport(): SharedReport | undefined {
   try {
-    const raw = new URLSearchParams(window.location.search).get("report");
+    const params = new URLSearchParams(window.location.search);
+    const compact = params.get("r");
+    if (compact) return decodeCompactShareReport(compact) ?? normalizeSharedReport(JSON.parse(decodeBase64Url(compact)));
+    const raw = params.get("report");
     if (!raw) return undefined;
     return normalizeSharedReport(JSON.parse(decodeURIComponent(escape(window.atob(raw)))));
   } catch {
@@ -1334,12 +1582,129 @@ function readSharedReport(): SharedReport | undefined {
   }
 }
 
-function encodeShareReport(report: SharedReport): string {
-  return window.btoa(unescape(encodeURIComponent(JSON.stringify(report))));
+function encodeCompactShareReport(result: RunResult): string {
+  const subjects = result.exams
+    .map((exam) => `${subjectShareIndex(exam.subject).toString(36)}:${encodeShareNumber(exam.score)}`)
+    .join("_");
+  const artifacts = result.artifactIds
+    .map((id) => artifactShareIndex(id))
+    .filter((index) => index >= 0)
+    .map((index) => index.toString(36))
+    .join("_");
+  return [
+    "2",
+    encodeBase64Url(state.playerName || "考生"),
+    encodeBase64Url(result.seed),
+    encodeShareNumber(result.totalScore),
+    encodeShareNumber(result.year),
+    encodeShareNumber(result.threshold),
+    subjects || "-",
+    artifacts || "-"
+  ].join(".");
+}
+
+function decodeCompactShareReport(value: string): SharedReport | undefined {
+  const [version, playerName, seed, score, year, threshold, subjects = "-", artifacts = "-"] = value.split(".");
+  if (version !== "2" || !playerName || !seed || !score || !year || !threshold) return undefined;
+  const decodedSubjects = decodeShareSubjects(subjects);
+  return {
+    playerName: decodeBase64Url(playerName),
+    seed: decodeBase64Url(seed),
+    score: decodeShareNumber(score),
+    year: Math.max(1, decodeShareNumber(year)),
+    threshold: Math.max(750, decodeShareNumber(threshold)),
+    title: resultTitle(decodeShareNumber(score)),
+    subjects: decodedSubjects.slice(0, 12),
+    artifacts: decodeShareArtifacts(artifacts).slice(0, 120)
+  };
+}
+
+function decodeShareSubjects(value: string): Array<{ label: string; score: string }> {
+  if (!value || value === "-") return [];
+  return value
+    .split("_")
+    .map((entry) => {
+      const [subjectIndexText, scoreText] = entry.split(":");
+      const subject = subjectByShareIndex(Number.parseInt(subjectIndexText, 36));
+      const score = decodeShareNumber(scoreText);
+      if (!subject || !Number.isFinite(score)) return undefined;
+      return { label: SUBJECT_LABELS[subject], score: formatNumber(score) };
+    })
+    .filter((item): item is { label: string; score: string } => Boolean(item));
+}
+
+function decodeShareArtifacts(value: string): string[] {
+  if (!value || value === "-") return [];
+  const artifacts = allArtifacts();
+  return value
+    .split("_")
+    .map((entry) => artifacts[Number.parseInt(entry, 36)]?.name)
+    .filter((name): name is string => typeof name === "string");
+}
+
+function encodeShareNumber(value: number): string {
+  return Math.max(0, Math.round(value)).toString(36);
+}
+
+function decodeShareNumber(value: string): number {
+  return Number.parseInt(value, 36);
+}
+
+function subjectShareIndex(subject: SubjectId): number {
+  return shareSubjects().indexOf(subject);
+}
+
+function subjectByShareIndex(index: number): SubjectId | undefined {
+  return shareSubjects()[index];
+}
+
+function artifactShareIndex(artifactId: string): number {
+  return allArtifacts().findIndex((artifact) => artifact.id === artifactId);
+}
+
+function shareSubjects(): SubjectId[] {
+  return [...REQUIRED_SUBJECTS, ...ELECTIVE_SUBJECTS] as SubjectId[];
+}
+
+function encodeBase64Url(value: string): string {
+  return window
+    .btoa(unescape(encodeURIComponent(value)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function decodeBase64Url(value: string): string {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return decodeURIComponent(escape(window.atob(base64)));
+}
+
+function sharePathname(pathname: string): string {
+  return pathname.replace(/\/(?:debug|result-debug)(?:\/index\.html)?\/?$/, "/");
 }
 
 function normalizeSharedReport(value: unknown): SharedReport | undefined {
   if (!value || typeof value !== "object") return undefined;
+  if (isCompactSharedReport(value)) {
+    return {
+      playerName: value.p,
+      seed: value.s,
+      score: Math.round(value.n),
+      year: Math.max(1, Math.round(value.y)),
+      threshold: Math.max(750, Math.round(value.t)),
+      title: resultTitle(value.n),
+      subjects: value.e
+        .filter((item): item is [SubjectId, string] =>
+          Array.isArray(item) && typeof item[0] === "string" && item[0] in SUBJECT_LABELS && typeof item[1] === "string"
+        )
+        .map(([subject, score]) => ({ label: SUBJECT_LABELS[subject], score }))
+        .slice(0, 12),
+      artifacts: value.a
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => findArtifact(id)?.name ?? id)
+        .slice(0, 120)
+    };
+  }
   const report = value as Partial<SharedReport>;
   if (
     typeof report.playerName !== "string" ||
@@ -1359,75 +1724,38 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
     score: Math.round(report.score),
     year: Math.max(1, Math.round(report.year)),
     threshold: Math.max(750, Math.round(report.threshold)),
-    title: report.title,
+    title: resultTitle(report.score),
     subjects: report.subjects
       .filter((item): item is { label: string; score: string } =>
         Boolean(item && typeof item === "object" && typeof item.label === "string" && typeof item.score === "string")
       )
       .slice(0, 12),
-    artifacts: report.artifacts.filter((item): item is string => typeof item === "string").slice(0, 12)
+    artifacts: report.artifacts.filter((item): item is string => typeof item === "string").slice(0, 120)
   };
 }
 
-function buildIssueBody(): string {
-  const bundle = buildIssueBundle();
-  return [
-    "反馈类型：Bug / 平衡性 / 文案 / 其它",
-    "一句话描述：",
-    "",
-    "复现步骤：",
-    "1. ",
-    "2. ",
-    "3. ",
-    "",
-    "期望表现：",
-    "",
-    "实际表现：",
-    "",
-    "诊断信息：",
-    JSON.stringify(bundle, null, 2)
-  ].join("\n");
-}
-
-function buildIssueBundle(): Record<string, unknown> {
-  return {
-    app: "请选择你的高考遗物",
-    capturedAt: new Date().toISOString(),
-    url: window.location.href,
-    userAgent: navigator.userAgent,
-    seed: state.seed,
-    playerName: state.playerName || "考生",
-    phase: state.phase,
-    subjects: subjectOrder().map((subject) => SUBJECT_LABELS[subject]),
-    autoPlay: state.autoPlay,
-    speedMultiplier: state.speedMultiplier,
-    speedMs: state.speedMs,
-    liveStatus: state.liveStatus,
-    score: state.result?.totalScore ?? currentScore(),
-    exams: state.exams.map((exam) => ({
-      subject: SUBJECT_LABELS[exam.subject],
-      score: exam.score
-    })),
-    currentExam: state.activeExam
-      ? {
-          subject: SUBJECT_LABELS[state.activeExam.subject],
-          questionIndex: state.activeExam.questionIndex,
-          score: Math.round(state.activeExam.score)
-      }
-      : undefined,
-    artifacts: state.artifacts.map((artifact) => ({
-      id: artifact.id,
-      name: artifact.name,
-      rarity: artifact.rarity
-    })),
-    recentQuestions: state.examQuestions.slice(-8).map((question) => ({
-      subject: SUBJECT_LABELS[question.subject],
-      questionIndex: question.questionIndex,
-      correct: question.correct,
-      scoreGained: question.scoreGained
-    })),
-    recentLogs: state.logs.slice(-12)
-  };
+function isCompactSharedReport(value: unknown): value is {
+  v: number;
+  p: string;
+  s: string;
+  n: number;
+  y: number;
+  t: number;
+  e: unknown[];
+  a: unknown[];
+} {
+  if (!value || typeof value !== "object") return false;
+  const report = value as Record<string, unknown>;
+  return (
+    report.v === 2 &&
+    typeof report.p === "string" &&
+    typeof report.s === "string" &&
+    typeof report.n === "number" &&
+    typeof report.y === "number" &&
+    typeof report.t === "number" &&
+    Array.isArray(report.e) &&
+    Array.isArray(report.a)
+  );
 }
 
 function currentScore(): number {
@@ -1452,8 +1780,13 @@ function showFooterNotice(message: string): void {
 function toggleSubject(subject: SubjectId): void {
   if (!canEditOpening()) return;
   if (!ELECTIVE_SUBJECTS.includes(subject as never)) return;
-  if (state.subjects.includes(subject)) return;
-  state.subjects = [...state.subjects, subject].slice(-3);
+  if (state.subjects.includes(subject)) {
+    state.subjects = state.subjects.filter((item) => item !== subject);
+    render();
+    return;
+  }
+  if (state.subjects.length >= 3) return;
+  state.subjects = [...state.subjects, subject];
   render();
 }
 
@@ -1477,33 +1810,46 @@ function setSpeedMultiplier(value: number): void {
   if (!SPEED_MULTIPLIERS.includes(value as SpeedMultiplier)) return;
   state.speedMultiplier = value as SpeedMultiplier;
   state.speedMs = speedDelayMs(state.speedMultiplier);
-  state.sprintExamIndex = undefined;
-  state.autoPlay = true;
-  state.waitingNext?.();
   render();
 }
 
-function restoreNormalSpeed(): void {
-  state.speedMultiplier = 1;
+function cycleSpeedMultiplier(): void {
+  const currentIndex = SPEED_MULTIPLIERS.indexOf(state.speedMultiplier);
+  const nextSpeed = SPEED_MULTIPLIERS[(currentIndex + 1) % SPEED_MULTIPLIERS.length];
+  setSpeedMultiplier(nextSpeed);
+  if (state.autoPlay) wakePlaybackDelays();
+}
+
+function restoreDefaultSpeed(): void {
+  state.speedMultiplier = DEFAULT_SPEED_MULTIPLIER;
   state.speedMs = speedDelayMs(state.speedMultiplier);
-  state.sprintExamIndex = undefined;
   state.autoPlay = true;
+}
+
+function stopSkipForScoreArtifact(): void {
+  if (!state.skipToSettlement) return;
+  state.skipToSettlement = false;
+  restoreDefaultSpeed();
+  wakePlaybackDelays();
 }
 
 function speedDelayMs(multiplier: SpeedMultiplier): number {
   return Math.round(BASE_SPEED_MS / multiplier);
 }
 
-function scoreFlashDelayMs(): number {
-  return Math.max(80, Math.min(420, Math.round(state.speedMs * 0.46)));
+function scoreCollectDelayMs(): number {
+  return Math.max(180, Math.min(360, Math.round(state.speedMs * 0.5)));
+}
+
+function scoreSettleHoldMs(): number {
+  return Math.max(180, Math.min(420, Math.round(state.speedMs * 0.55)));
 }
 
 function triggerDelayMs(timing: TriggerEvent["timing"]): number {
-  if (timing === "EXAM_END") {
-    return Math.max(1000, Math.min(1500, Math.round(state.speedMs * 0.9)));
-  }
-  if (state.speedMs <= 0) return 0;
-  return Math.max(80, Math.round(state.speedMs * 0.55));
+  const factor = timing === "EXAM_END" ? 0.9 : 0.55;
+  const floor = timing === "EXAM_END" ? 120 : 80;
+  const chainAcceleration = Math.pow(0.82, Math.max(0, state.chainCount - 1));
+  return Math.max(floor, Math.round(state.speedMs * factor * chainAcceleration));
 }
 
 function debugSearchResults(): ArtifactConfig[] {
@@ -1566,9 +1912,81 @@ function readDebugArtifactIds(): string[] {
   }
 }
 
+function createResultDebugRun(): RunResult {
+  const subjects: SubjectId[] = ["chinese", "math", "english", "physics", "chemistry", "biology"];
+  const exams: ExamLog[] = [
+    debugExamLog("chinese", 123456, 15, 0, 82304, 1.5, 0),
+    debugExamLog("math", 98765, 14, 1, 49382.5, 2, 0),
+    debugExamLog("english", 76432, 13, 2, 76432, 1, 0),
+    debugExamLog("physics", 54321, 9, 1, 27160.5, 2, 0),
+    debugExamLog("chemistry", 43210, 8, 2, 21605, 2, 0),
+    debugExamLog("biology", 32109, 7, 3, 32109, 1, 0)
+  ];
+  const artifacts = (LOCAL_ARTIFACTS as readonly ArtifactConfig[]).slice(0, 24);
+  const totalScore = exams.reduce((sum, exam) => sum + exam.score, 0);
+  return {
+    seed: "result-debug-100000",
+    subjects,
+    year: 4,
+    threshold: 100000,
+    artifactIds: artifacts.map((artifact) => artifact.id),
+    artifactNames: artifacts.map((artifact) => artifact.name),
+    carryoverStats: {
+      baseAccuracy: 88,
+      baseStamina: 160,
+      stamina: 160,
+      staminaDecay: 3,
+      staminaFloor: 0,
+      artifactLimit: 24,
+      draftChoicesBonus: 2,
+      nextDraftChoicesBonus: 0,
+      questionMultiplierBase: 3,
+      currentTotalAdjustment: 0,
+      luckyBlockValueMultiplier: 4,
+      pendingNextExamScore: 0,
+      preventDiscardCharges: 1
+    },
+    exams,
+    totalScore,
+    log: []
+  };
+}
+
+function debugExamLog(
+  subject: SubjectId,
+  score: number,
+  correctCount: number,
+  wrongCount: number,
+  rawScore: number,
+  examMultiplier: number,
+  examPostBonus: number
+): ExamLog {
+  return {
+    subject,
+    rawScore,
+    examMultiplier,
+    examPostBonus,
+    score,
+    correctCount,
+    wrongCount,
+    questions: []
+  };
+}
+
+function artifactsForResult(result: RunResult): ArtifactConfig[] {
+  return result.artifactIds
+    .map((id) => findArtifact(id))
+    .filter((artifact): artifact is ArtifactConfig => Boolean(artifact));
+}
+
 function isDebugRoute(): boolean {
   const path = window.location.pathname.replace(/\/+$/, "");
   return path.endsWith("/debug") || path.endsWith("/debug/index.html");
+}
+
+function isResultDebugRoute(): boolean {
+  const path = window.location.pathname.replace(/\/+$/, "");
+  return path.endsWith("/result-debug") || path.endsWith("/result-debug/index.html");
 }
 
 function rarityClass(rarity: ArtifactConfig["rarity"]): string {
@@ -1608,13 +2026,12 @@ function resetRunState(): void {
   state.choicePrompt = undefined;
   state.activeExam = undefined;
   state.currentQuestion = undefined;
-  state.waitingNext = undefined;
+  state.settlementContinue = undefined;
+  state.skipToSettlement = false;
   state.result = undefined;
   state.sharedReport = undefined;
   state.scoreChoicePrompt = undefined;
-  state.speedMultiplier = 1;
-  state.speedMs = speedDelayMs(state.speedMultiplier);
-  state.sprintExamIndex = undefined;
+  restoreDefaultSpeed();
 }
 
 function resetToStart(newSeed: boolean): void {
@@ -1622,6 +2039,24 @@ function resetToStart(newSeed: boolean): void {
   if (newSeed) state.seed = defaultSeed();
   resetRunState();
   state.phase = "start";
+  render();
+}
+
+function resetResultDebug(): void {
+  const result = createResultDebugRun();
+  state.runId += 1;
+  resetRunState();
+  state.phase = "result";
+  state.seed = result.seed;
+  state.playerName = "结算页调试";
+  state.subjects = result.subjects;
+  state.artifacts = artifactsForResult(result);
+  state.exams = result.exams;
+  state.logs = result.log;
+  state.result = result;
+  state.endlessActive = true;
+  state.endlessYear = result.year;
+  state.scoreThreshold = result.threshold;
   render();
 }
 
@@ -1691,8 +2126,14 @@ function createRunHooks(runId: number): ChoiceHooks {
       if (!isCurrentRun(runId)) return;
       await playTriggerEvent(runId, event);
     },
-    chooseOnesDigit: async (score, subject) => (await promptOnesDigitChoice(runId, score, subject)) ?? 9,
-    chooseDigitSwap: (score, subject) => promptDigitSwapChoice(runId, score, subject),
+    chooseOnesDigit: async (score, subject) => {
+      stopSkipForScoreArtifact();
+      return (await promptOnesDigitChoice(runId, score, subject)) ?? 9;
+    },
+    chooseDigitSwap: (score, subject) => {
+      stopSkipForScoreArtifact();
+      return promptDigitSwapChoice(runId, score, subject);
+    },
     onArtifactsChanged: (owned) => {
       if (!isCurrentRun(runId)) return;
       state.artifacts = owned;
@@ -1705,9 +2146,6 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.triggerQueue = [];
       state.activeTrigger = undefined;
       state.examSettlement = undefined;
-      if (state.sprintExamIndex !== undefined && state.sprintExamIndex !== exam.index) {
-        restoreNormalSpeed();
-      }
       state.chainCount = 0;
       state.scoreFlash = undefined;
       state.scoreAdjustment = 0;
@@ -1736,11 +2174,16 @@ function createRunHooks(runId: number): ChoiceHooks {
         questionIndex: exam.questionIndex,
         score: state.activeExam?.score ?? 0
       };
+      if (state.skipToSettlement) return;
       render();
       await waitForNextQuestion(runId);
     },
-    onQuestion: (question, exam) => {
+    onQuestion: async (question, exam) => {
       if (!isCurrentRun(runId)) return;
+      const scoreGained = roundDelta(question.scoreGained);
+      const examScoreAfter = roundDelta(exam.rawScore);
+      const examScoreBefore = roundDelta(examScoreAfter - scoreGained);
+      const hasBankingScore = Math.abs(scoreGained) > 0.0001;
       state.currentQuestion = question;
       state.examQuestions = [...state.examQuestions, question];
       state.liveStatus = exam.status;
@@ -1748,32 +2191,34 @@ function createRunHooks(runId: number): ChoiceHooks {
         index: exam.index,
         subject: exam.subject,
         questionIndex: question.questionIndex,
-        score: exam.rawScore + exam.examPostBonus
+        score: hasBankingScore ? examScoreBefore : examScoreAfter
       };
       state.scoreAdjustment = exam.currentTotalAdjustment;
+      if (state.skipToSettlement) return;
       const visualEvent: VisualEvent = {
         id: `score-${Date.now()}-${question.questionIndex}`,
-        label: question.correct ? `+${question.scoreGained}` : "失误",
-        tone: question.correct ? "score" : "fail",
-        kind: question.correct ? "score:add" : "score:fail",
-        intensity: scoreIntensity(question.scoreGained, exam.status)
+        label: hasBankingScore ? formatDelta(scoreGained) : question.correct ? "判定成功" : "失误",
+        tone: hasBankingScore ? "score" : question.correct ? "score" : "fail",
+        kind: hasBankingScore ? "score:bank" : question.correct ? "score:add" : "score:fail",
+        intensity: scoreIntensity(Math.abs(scoreGained), exam.status),
+        detailText: questionBankingDetail(question, scoreGained),
+        scoreDelta: scoreGained,
+        scoreBefore: roundDelta(exam.currentTotalScore - scoreGained),
+        scoreAfter: exam.currentTotalScore,
+        examScoreBefore,
+        examScoreAfter,
+        scoreBanking: hasBankingScore
       };
       state.scoreFlash = visualEvent;
       state.visualEvents = [visualEvent, ...state.visualEvents].slice(0, 12);
       render();
-      window.setTimeout(() => {
-        if (state.scoreFlash?.id === visualEvent.id) {
-          state.scoreFlash = undefined;
-          render();
-        }
-      }, scoreFlashDelayMs());
+      await settleScoreFlash(runId, visualEvent);
     },
     onExamEnd: async (exam) => {
       if (!isCurrentRun(runId)) return;
-      const endedExamIndex = state.activeExam?.index;
       const visualEvent: VisualEvent = {
         id: `settlement-${Date.now()}-${exam.subject}`,
-        label: `+${exam.score}`,
+        label: formatDelta(exam.score),
         tone: "score",
         kind: "score:add",
         intensity: scoreIntensity(exam.score, state.liveStatus)
@@ -1789,9 +2234,8 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.scoreFlash = visualEvent;
       state.visualEvents = [visualEvent, ...state.visualEvents].slice(0, 12);
       state.examSettlement = exam;
-      if (state.sprintExamIndex === endedExamIndex) {
-        restoreNormalSpeed();
-      }
+      state.skipToSettlement = false;
+      restoreDefaultSpeed();
       render();
       await waitForExamSettlement(runId);
       if (!isCurrentRun(runId)) return;
@@ -1803,7 +2247,7 @@ function createRunHooks(runId: number): ChoiceHooks {
       if (!isCurrentRun(runId)) return;
       state.result = result;
       state.examSettlement = undefined;
-      restoreNormalSpeed();
+      restoreDefaultSpeed();
       state.phase = "result";
     }
   };
@@ -1954,21 +2398,14 @@ function digitPlaceLabel(index: number, length: number): string {
 
 function waitForNextQuestion(runId: number): Promise<void> {
   if (!isCurrentRun(runId)) return Promise.resolve();
-  if (state.autoPlay) return delay(state.speedMs);
-  return new Promise((resolve) => {
-    state.waitingNext = () => {
-      state.waitingNext = undefined;
-      resolve();
-      render();
-    };
-  });
+  return playbackDelay(runId, state.speedMs);
 }
 
 function waitForExamSettlement(runId: number): Promise<void> {
   if (!isCurrentRun(runId)) return Promise.resolve();
   return new Promise((resolve) => {
-    state.waitingNext = () => {
-      state.waitingNext = undefined;
+    state.settlementContinue = () => {
+      state.settlementContinue = undefined;
       resolve();
       render();
     };
@@ -1976,6 +2413,17 @@ function waitForExamSettlement(runId: number): Promise<void> {
 }
 
 async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<void> {
+  if (state.skipToSettlement) {
+    state.liveStatus = event.after;
+    if (state.activeExam) {
+      state.activeExam = {
+        ...state.activeExam,
+        score: visibleTriggerExamScore(event)
+      };
+    }
+    state.scoreAdjustment = event.scoreAfter.currentTotalAdjustment;
+    return;
+  }
   const visualEvent = triggerEventToVisual(event);
   state.chainCount += 1;
   state.triggerQueue = [...state.triggerQueue, visualEvent];
@@ -1984,7 +2432,7 @@ async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<voi
   if (state.activeExam) {
     state.activeExam = {
       ...state.activeExam,
-      score: event.scoreAfter.currentExamScore + event.scoreAfter.examPostBonus
+      score: visibleTriggerExamScore(event)
     };
   }
   state.scoreAdjustment = event.scoreAfter.currentTotalAdjustment;
@@ -1992,10 +2440,42 @@ async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<voi
   render();
   const triggerDelay = triggerDelayMs(event.timing);
   if (triggerDelay > 0) {
-    await delay(triggerDelay);
+    await playbackDelay(runId, triggerDelay);
   }
   if (!isCurrentRun(runId)) return;
   state.triggerQueue = state.triggerQueue.filter((item) => item.id !== visualEvent.id);
+}
+
+function visibleTriggerExamScore(event: TriggerEvent): number {
+  const pendingQuestionScore =
+    event.questionScoreGained &&
+    (event.timing === "QUESTION_END" || (event.timing === "OTHER_ARTIFACT_TRIGGERED" && event.sourceTiming === "QUESTION_END"))
+      ? event.questionScoreGained
+      : 0;
+  return roundDelta(event.scoreAfter.currentExamScore - pendingQuestionScore);
+}
+
+async function settleScoreFlash(runId: number, visualEvent: VisualEvent): Promise<void> {
+  await playbackDelay(runId, scoreCollectDelayMs());
+  if (!isCurrentRun(runId) || state.scoreFlash?.id !== visualEvent.id) return;
+  const shouldBankScore = Boolean(
+    visualEvent.scoreBanking &&
+      state.activeExam &&
+      visualEvent.examScoreAfter !== undefined &&
+      Math.abs((visualEvent.scoreDelta ?? 0)) > 0.0001
+  );
+  if (shouldBankScore && state.activeExam && visualEvent.examScoreAfter !== undefined) {
+    state.activeExam = {
+      ...state.activeExam,
+      score: visualEvent.examScoreAfter
+    };
+  }
+  state.scoreFlash = { ...state.scoreFlash, settling: shouldBankScore };
+  render();
+  await playbackDelay(runId, scoreSettleHoldMs());
+  if (!isCurrentRun(runId) || state.scoreFlash?.id !== visualEvent.id) return;
+  state.scoreFlash = undefined;
+  render();
 }
 
 function triggerEventToVisual(event: TriggerEvent): VisualEvent {
@@ -2053,6 +2533,17 @@ function scoreIntensity(scoreGained: number, status: LiveExamStatus): EffectInte
   return "low";
 }
 
+function questionBankingDetail(question: QuestionLog, scoreGained: number): string {
+  if (Math.abs(scoreGained) <= 0.0001) {
+    return question.correct ? "本题 0 分" : "本题未得分";
+  }
+  const base = question.questionBaseScore;
+  const multiplier = question.questionMultiplier;
+  const flat = question.questionFlatScore;
+  const flatText = Math.abs(flat) > 0.0001 ? ` ${formatDelta(flat)}` : "";
+  return `基础 ${formatNumber(base)} x${formatNumber(multiplier)}${flatText} = ${formatDelta(scoreGained)}`;
+}
+
 function diffStatus(before: LiveExamStatus, after: LiveExamStatus): StatDelta[] {
   const items: Array<[keyof LiveExamStatus, string]> = [
     ["accuracy", "正确率"],
@@ -2099,6 +2590,51 @@ function isCurrentRun(runId: number): boolean {
   return runId === state.runId;
 }
 
+function wakePlaybackDelays(): void {
+  const resolvers = playbackDelayResolvers;
+  playbackDelayResolvers = [];
+  for (const resolve of resolvers) resolve();
+}
+
+function nextPlaybackWake(): { promise: Promise<void>; cancel: () => void } {
+  let resolveWake!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    resolveWake = resolve;
+  });
+  playbackDelayResolvers.push(resolveWake);
+  return {
+    promise,
+    cancel: () => {
+      playbackDelayResolvers = playbackDelayResolvers.filter((resolve) => resolve !== resolveWake);
+    }
+  };
+}
+
+async function playbackDelay(runId: number, ms: number): Promise<void> {
+  let remaining = Math.max(0, ms);
+  let speedAtLastCheck = state.speedMultiplier;
+  while (remaining > 0) {
+    if (!isCurrentRun(runId)) return;
+    if (state.speedMs <= 0) return;
+    if (state.speedMultiplier !== speedAtLastCheck) {
+      remaining = Math.max(0, remaining * (speedAtLastCheck / state.speedMultiplier));
+      speedAtLastCheck = state.speedMultiplier;
+    }
+    if (!state.autoPlay) {
+      const wake = nextPlaybackWake();
+      await wake.promise;
+      wake.cancel();
+      continue;
+    }
+    const wake = nextPlaybackWake();
+    const started = performance.now();
+    await Promise.race([delay(remaining), wake.promise]);
+    wake.cancel();
+    if (!isCurrentRun(runId)) return;
+    remaining = Math.max(0, remaining - (performance.now() - started));
+  }
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -2108,7 +2644,19 @@ function defaultSeed(): string {
 }
 
 function formatNumber(value: number): string {
-  return String(Math.round(value * 100) / 100);
+  if (!Number.isFinite(value)) return String(value);
+  const rounded = Math.round(value * 100) / 100;
+  if (Math.abs(rounded) >= 100000) {
+    return formatScientific(rounded);
+  }
+  return String(rounded);
+}
+
+function formatScientific(value: number): string {
+  const [mantissa = "0", exponent = "0"] = value.toExponential(2).split("e");
+  const compactMantissa = mantissa.replace(/\.?0+$/, "");
+  const compactExponent = (exponent.replace(/^\+/, "").replace(/^(-?)0+/, "$1") || "0");
+  return `${compactMantissa}e${compactExponent}`;
 }
 
 function formatDelta(value: number, key?: keyof LiveExamStatus): string {
