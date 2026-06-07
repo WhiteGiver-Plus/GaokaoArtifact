@@ -1,5 +1,13 @@
 import QRCode from "qrcode";
 import { toPng } from "html-to-image";
+import {
+  flushEvents,
+  loadLeaderboard,
+  publicSiteUrl,
+  submitFeedback,
+  trackEvent,
+  verifyRun
+} from "./backend/client.js";
 import { LOCAL_ARTIFACTS } from "./artifacts.generated.js";
 import {
   DEFAULT_ELECTIVE_SUBJECTS,
@@ -17,6 +25,23 @@ import {
   type SubjectId,
   type TriggerEvent
 } from "./core/browser.js";
+import {
+  createDecisionTrace,
+  createDecisionTraceRun,
+  type AppVersionInfo,
+  type DecisionTrace,
+  type DecisionTraceEntry,
+  type DecisionTraceRun,
+  type LeaderboardEntry,
+  type ScoreDecisionEntry
+} from "./core/trace.js";
+import {
+  DEBUG_NICKNAME,
+  MAX_NICKNAME_LENGTH,
+  nicknameErrorMessage,
+  publicNickname,
+  reviewNickname
+} from "./core/moderation.js";
 
 const root = requireElement("root");
 const DEBUG_ROUTE = isDebugRoute();
@@ -63,6 +88,24 @@ interface ScoreChoiceOption {
 
 interface RestartConfirm {
   resumeAutoPlay: boolean;
+}
+
+type ServiceStatus = "idle" | "loading" | "submitting" | "ready" | "sent" | "error";
+
+interface LeaderboardState {
+  status: ServiceStatus;
+  entries: LeaderboardEntry[];
+  submittedRunId?: string;
+  selectedRunId?: string;
+  error?: string;
+}
+
+interface FeedbackState {
+  open: boolean;
+  message: string;
+  contact: string;
+  status: ServiceStatus;
+  error?: string;
 }
 
 interface VisualEvent {
@@ -145,6 +188,9 @@ interface UiState {
   debugSearch: string;
   footerNotice?: string;
   copyToast?: string;
+  decisionTrace: DecisionTrace;
+  leaderboard: LeaderboardState;
+  feedback: FeedbackState;
 }
 
 const RESULT_DEBUG_RUN = RESULT_DEBUG_ROUTE ? createResultDebugRun() : undefined;
@@ -154,7 +200,7 @@ const state: UiState = {
   runId: 0,
   phase: RESULT_DEBUG_RUN ? "result" : "start",
   seed: RESULT_DEBUG_RUN?.seed ?? defaultSeed(),
-  playerName: RESULT_DEBUG_RUN ? "结算页调试" : readPlayerName(),
+  playerName: DEBUG_ROUTE || RESULT_DEBUG_ROUTE ? DEBUG_NICKNAME : readPlayerName(),
   subjects: RESULT_DEBUG_RUN?.subjects ?? [...DEFAULT_ELECTIVE_SUBJECTS],
   artifacts: RESULT_DEBUG_ARTIFACTS,
   exams: RESULT_DEBUG_RUN?.exams ?? [],
@@ -183,7 +229,10 @@ const state: UiState = {
   skipToSettlement: false,
   debugArtifactIds: DEBUG_ROUTE ? readDebugArtifactIds() : [],
   debugSearchInput: "",
-  debugSearch: ""
+  debugSearch: "",
+  decisionTrace: createDecisionTrace(),
+  leaderboard: { status: "idle", entries: [] },
+  feedback: { open: false, message: "", contact: "", status: "idle" }
 };
 
 let playbackDelayResolvers: Array<() => void> = [];
@@ -194,6 +243,7 @@ root.addEventListener("click", (event) => {
   const scoreChoice = target.closest<HTMLElement>("[data-score-choice]")?.dataset.scoreChoice;
   const scorePosition = target.closest<HTMLElement>("[data-score-position]")?.dataset.scorePosition;
   const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
+  const leaderboardRun = target.closest<HTMLElement>("[data-leaderboard-run]")?.dataset.leaderboardRun;
   const subject = target.closest<HTMLElement>("[data-subject]")?.dataset.subject as
     | SubjectId
     | undefined;
@@ -227,7 +277,10 @@ root.addEventListener("click", (event) => {
     return;
   }
   if (action === "start-run") {
-    if (state.subjects.length !== 3) return;
+    if (!canStartRun()) {
+      syncNameReview();
+      return;
+    }
     void restartRun(false);
     return;
   }
@@ -241,6 +294,27 @@ root.addEventListener("click", (event) => {
   }
   if (action === "download-share-image") {
     void downloadShareImage();
+    return;
+  }
+  if (action === "refresh-leaderboard") {
+    void refreshLeaderboard();
+    return;
+  }
+  if (action === "submit-leaderboard") {
+    void submitLeaderboardEntry();
+    return;
+  }
+  if (action === "toggle-feedback") {
+    state.feedback = { ...state.feedback, open: !state.feedback.open, status: "idle", error: undefined };
+    render();
+    return;
+  }
+  if (action === "submit-feedback") {
+    void submitFeedbackMessage();
+    return;
+  }
+  if (leaderboardRun) {
+    toggleLeaderboardDetail(leaderboardRun);
     return;
   }
   if (action === "cancel-restart") {
@@ -306,20 +380,62 @@ root.addEventListener("click", (event) => {
 });
 
 root.addEventListener("input", (event) => {
-  const input = event.target as HTMLInputElement;
+  const input = event.target as HTMLInputElement | HTMLTextAreaElement;
   if (input.dataset.field === "player-name") {
+    if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE) {
+      state.playerName = DEBUG_NICKNAME;
+      syncNameReview();
+      return;
+    }
     state.playerName = input.value;
     try {
       window.localStorage.setItem("gaokao-player-name", state.playerName);
     } catch {
       // localStorage may be unavailable in private or restricted contexts.
     }
+    syncNameReview();
     return;
   }
   if (input.dataset.field === "debug-search") {
     state.debugSearchInput = input.value;
   }
+  if (input.dataset.field === "feedback-message") {
+    state.feedback = { ...state.feedback, message: input.value, status: "idle", error: undefined };
+    syncFeedbackControls();
+    return;
+  }
+  if (input.dataset.field === "feedback-contact") {
+    state.feedback = { ...state.feedback, contact: input.value, status: "idle", error: undefined };
+    syncFeedbackControls();
+    return;
+  }
 });
+
+function syncFeedbackStateFromDom(): void {
+  const messageInput = root.querySelector<HTMLTextAreaElement>('[data-field="feedback-message"]');
+  const contactInput = root.querySelector<HTMLInputElement>('[data-field="feedback-contact"]');
+  state.feedback = {
+    ...state.feedback,
+    message: messageInput?.value ?? state.feedback.message,
+    contact: contactInput?.value ?? state.feedback.contact
+  };
+}
+
+function canSubmitFeedback(): boolean {
+  return state.feedback.status !== "submitting" && state.feedback.message.trim().length > 0;
+}
+
+function syncFeedbackControls(): void {
+  root.querySelectorAll<HTMLElement>("[data-feedback-status]").forEach((status) => {
+    status.textContent = feedbackStatusText();
+    status.classList.toggle("service-error", state.feedback.status === "error");
+  });
+
+  const button = root.querySelector<HTMLButtonElement>('[data-action="submit-feedback"]');
+  if (button) {
+    button.disabled = !canSubmitFeedback();
+  }
+}
 
 root.addEventListener("keydown", (event) => {
   if (state.restartConfirm && event.key === "Escape") {
@@ -344,6 +460,7 @@ root.addEventListener("keydown", (event) => {
 window.addEventListener("resize", syncColumnHeights);
 
 render();
+trackEvent("page_view", { debug: DEBUG_ROUTE, resultDebug: RESULT_DEBUG_ROUTE });
 
 function render(): void {
   const intensity = state.activeTrigger?.intensity ?? state.scoreFlash?.intensity ?? "low";
@@ -527,7 +644,7 @@ function renderScorePositionButton(
 }
 
 function renderStart(): string {
-  const canStart = state.subjects.length === 3;
+  const canStart = canStartRun();
   return `
     <section class="start-screen">
       <div class="start-layout ${DEBUG_ROUTE ? "start-layout-debug" : ""}">
@@ -608,18 +725,26 @@ function renderDraft(prompt: ChoicePrompt): string {
 
 function renderTicketProfile(selected: SubjectId[]): string {
   const selectedLabels = selected.map((subject) => SUBJECT_LABELS[subject]).join(" / ");
+  const nameLocked = DEBUG_ROUTE || RESULT_DEBUG_ROUTE;
+  const nameReview = nameLocked ? { ok: true, message: "" } : reviewNickname(state.playerName);
   return `
     <div class="ticket-profile">
-      <label class="player-name-field">
+      <label class="player-name-field name-review-field">
         <span>考生姓名</span>
         <input
+          class="name-input ${nameReview.ok ? "" : "name-input-invalid"}"
           data-field="player-name"
           value="${escapeAttr(state.playerName)}"
+          maxlength="${MAX_NICKNAME_LENGTH}"
           placeholder="输入你的名字"
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
+          ${nameLocked ? "disabled" : ""}
+          aria-invalid="${nameReview.ok ? "false" : "true"}"
+          aria-describedby="player-name-review"
         />
+        <small id="player-name-review" class="name-review blocked" data-name-review ${nameReview.ok ? "hidden" : ""}>${escapeHtml(nameReview.message)}</small>
       </label>
       <div class="subject-picker" aria-label="选科">
         <div class="subject-picker-head">
@@ -636,6 +761,30 @@ function renderTicketProfile(selected: SubjectId[]): string {
       </div>
     </div>
   `;
+}
+
+function canStartRun(): boolean {
+  return state.subjects.length === 3 && (DEBUG_ROUTE || RESULT_DEBUG_ROUTE || reviewNickname(state.playerName).ok);
+}
+
+function syncNameReview(): void {
+  if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE) {
+    state.playerName = DEBUG_NICKNAME;
+  }
+  const nameReview = reviewNickname(state.playerName);
+  root.querySelectorAll<HTMLElement>("[data-name-review]").forEach((element) => {
+    element.textContent = nameReview.message;
+    element.hidden = nameReview.ok;
+    element.className = "name-review blocked";
+  });
+  root.querySelectorAll<HTMLInputElement>('[data-field="player-name"]').forEach((input) => {
+    input.classList.toggle("name-input-invalid", !nameReview.ok);
+    input.setAttribute("aria-invalid", nameReview.ok ? "false" : "true");
+  });
+  const startButton = root.querySelector<HTMLButtonElement>('[data-action="start-run"]');
+  if (startButton) {
+    startButton.disabled = !canStartRun();
+  }
 }
 
 function renderDebugBuilder(): string {
@@ -866,7 +1015,7 @@ function renderExamSettlement(): string {
             .map((item) => `<span>${SUBJECT_LABELS[item.subject]} <strong>${formatNumber(item.score)}</strong></span>`)
             .join("")}
         </div>
-        <div class="settlement-card-link">whitegiver-plus.github.io/GaokaoArtifact</div>
+        <div class="settlement-card-link">${escapeHtml(siteDisplayUrl())}</div>
         <button class="primary-button" type="button" data-action="continue-settlement">继续考试</button>
       </article>
     </section>
@@ -1270,7 +1419,7 @@ function renderResult(result: RunResult): string {
         <p class="mono-label">${state.endlessActive ? `ENDLESS YEAR ${result.year}` : "FINAL SCORE"}</p>
         <div class="final-score ${result.totalScore > 750 ? "over-score" : ""}">${totalScoreText}</div>
         <h1>${title}</h1>
-        <p>${escapeHtml(state.playerName || "考生")} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件遗物。</p>
+        <p>${escapeHtml(publicPlayerName())} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件遗物。</p>
         <div class="endless-panel ${passedThreshold ? "passed" : "failed"}">
           <div>
             <span>${passedThreshold ? "下一年录取线" : "本轮录取线"}</span>
@@ -1283,6 +1432,7 @@ function renderResult(result: RunResult): string {
         <div class="result-subjects">
           ${renderResultSubjectRows(result)}
         </div>
+        ${renderServicesPanel()}
         <div class="result-actions">
           ${passedThreshold && !RESULT_DEBUG_ROUTE ? `<button class="primary-button" type="button" data-action="continue-endless">进入第 ${result.year + 1} 年</button>` : ""}
           <button class="secondary-button" type="button" data-action="copy-share-link">复制战报链接</button>
@@ -1306,10 +1456,10 @@ function renderShareCard(result: RunResult, title: string): string {
     <section class="share-card-preview" aria-label="分享卡片预览">
       <div class="share-card-paper">
         <div class="share-card-head">
-          <div><span class="mono-label">REPORT CARD</span><strong>whitegiver-plus.github.io/GaokaoArtifact</strong></div>
+          <div><span class="mono-label">REPORT CARD</span><strong>${escapeHtml(siteDisplayUrl())}</strong></div>
           <span>${result.year > 1 ? `YEAR ${result.year}` : "本地战报"}</span>
         </div>
-        <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(state.playerName || "考生")}</strong></div>
+        <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(publicPlayerName())}</strong></div>
         <div class="share-card-score-row">
           <div class="share-card-score ${result.totalScore > 750 ? "over-score" : ""}">${totalScoreText}</div>
           <div class="share-card-qr-box">
@@ -1367,6 +1517,249 @@ function renderResultSubjectRows(result: RunResult): string {
     .join("");
 }
 
+function renderServicesPanel(): string {
+  if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE) return "";
+  return `
+    <section class="services-panel" aria-label="榜单">
+      <div class="service-strip">
+        <div>
+          <span class="mono-label">LEADERBOARD</span>
+          <strong>${leaderboardStatusText()}</strong>
+        </div>
+        <div class="service-actions">
+          <button class="secondary-button" type="button" data-action="refresh-leaderboard">刷新榜单</button>
+          <button class="primary-button" type="button" data-action="submit-leaderboard" ${state.leaderboard.status === "submitting" ? "disabled" : ""}>提交分数</button>
+        </div>
+      </div>
+      ${renderLeaderboardRows()}
+    </section>
+  `;
+}
+
+function renderFeedbackDock(): string {
+  return `
+    <section class="feedback-dock ${state.feedback.open ? "is-open" : ""}" aria-label="意见反馈">
+      <div class="feedback-dock-bar">
+        <div>
+          <span class="mono-label">FEEDBACK</span>
+          <strong data-feedback-status class="${state.feedback.status === "error" ? "service-error" : ""}">${escapeHtml(feedbackStatusText())}</strong>
+        </div>
+        <button class="secondary-button" type="button" data-action="toggle-feedback" aria-expanded="${state.feedback.open ? "true" : "false"}">
+          ${state.feedback.open ? "收起" : "反馈"}
+        </button>
+      </div>
+      ${state.feedback.open ? renderFeedbackForm() : ""}
+    </section>
+  `;
+}
+
+function renderLeaderboardRows(): string {
+  if (state.leaderboard.status === "loading") {
+    return `<div class="service-empty">榜单读取中</div>`;
+  }
+  if (state.leaderboard.status === "error") {
+    return `<div class="service-empty service-error">${escapeHtml(state.leaderboard.error ?? "榜单暂不可用")}</div>`;
+  }
+  if (state.leaderboard.entries.length === 0) {
+    return `<div class="service-empty">暂无榜单记录</div>`;
+  }
+  return `
+    <ol class="leaderboard-list">
+      ${state.leaderboard.entries
+        .map(
+          (entry, index) => `
+            <li class="${entry.runId === state.leaderboard.submittedRunId ? "current-entry" : ""}">
+              <button class="leaderboard-row" type="button" data-leaderboard-run="${escapeAttr(entry.runId)}" aria-expanded="${state.leaderboard.selectedRunId === entry.runId ? "true" : "false"}">
+                <span>${index + 1}</span>
+                <strong>${escapeHtml(entry.nickname)}</strong>
+                <em>${formatNumber(entry.score)}</em>
+                <small>Y${entry.year} / ${entry.artifactCount} 件</small>
+              </button>
+              ${state.leaderboard.selectedRunId === entry.runId ? renderLeaderboardDetail(entry) : ""}
+            </li>
+          `
+        )
+        .join("")}
+    </ol>
+  `;
+}
+
+function renderLeaderboardDetail(entry: LeaderboardEntry): string {
+  const share = entry.share;
+  const exams = share?.exams ?? [];
+  const artifactNames = share?.artifactNames ?? [];
+  const versionInfo = share?.appVersion ?? entry.appVersion;
+  return `
+    <div class="leaderboard-detail">
+      <div class="leaderboard-detail-meta">
+        <span>SEED <strong>${escapeHtml(share?.seed ?? entry.seed)}</strong></span>
+        <span>录取线 <strong>${formatNumber(share?.threshold ?? entry.threshold)}</strong></span>
+        <span>总分 <strong>${formatNumber(share?.totalScore ?? entry.score)}</strong></span>
+      </div>
+      <div class="leaderboard-detail-version">
+        ${renderLeaderboardVersion(versionInfo)}
+      </div>
+      ${
+        exams.length
+          ? `<div class="leaderboard-detail-scores">
+              ${exams
+                .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`)
+                .join("")}
+            </div>`
+          : ""
+      }
+      ${
+        artifactNames.length
+          ? `<div class="leaderboard-detail-artifacts">
+              ${artifactNames.map((name, index) => renderArtifactChip(name, share?.artifactIds?.[index])).join("")}
+            </div>`
+          : `<div class="service-empty">暂无战报详情</div>`
+      }
+      ${renderLeaderboardTrace(share?.trace)}
+    </div>
+  `;
+}
+
+function renderLeaderboardVersion(info?: AppVersionInfo): string {
+  if (!info) {
+    return `<span>版本 <strong>旧记录</strong></span>`;
+  }
+  return `
+    <span>版本 <strong>${escapeHtml(info.packageVersion)}</strong></span>
+    <span>提交 <strong>${escapeHtml(shortCommit(info.commit))}</strong></span>
+    <span>构建 <strong>${escapeHtml(formatBuildTime(info.buildTime))}</strong></span>
+  `;
+}
+
+function renderLeaderboardTrace(trace?: DecisionTrace): string {
+  if (!trace?.runs?.length) return "";
+  const choiceCount = trace.runs.reduce((total, run) => total + run.entries.length, 0);
+  return `
+    <div class="leaderboard-detail-trace">
+      <div class="leaderboard-detail-section-title">
+        <strong>完整选择</strong>
+        <span>Trace v${trace.version} / ${choiceCount} 条</span>
+      </div>
+      ${trace.runs.map((run, index) => renderLeaderboardTraceRun(run, index)).join("")}
+    </div>
+  `;
+}
+
+function renderLeaderboardTraceRun(run: DecisionTraceRun, index: number): string {
+  const subjectText = run.subjects.map((subject) => SUBJECT_LABELS[subject] ?? subject).join(" / ");
+  const title = run.mode === "endless" ? `第 ${run.year} 年` : index === 0 ? "首年" : `第 ${run.year} 年`;
+  return `
+    <div class="leaderboard-trace-run">
+      <div class="leaderboard-trace-run-head">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(run.seed)}</span>
+        <small>${escapeHtml(subjectText)} / 线 ${formatNumber(run.threshold)}</small>
+      </div>
+      ${
+        run.entries.length
+          ? `<ol class="leaderboard-choice-list">
+              ${run.entries.map((entry, entryIndex) => renderLeaderboardTraceEntry(entry, entryIndex)).join("")}
+            </ol>`
+          : `<div class="service-empty">本段没有选择记录</div>`
+      }
+    </div>
+  `;
+}
+
+function renderLeaderboardTraceEntry(entry: DecisionTraceEntry, index: number): string {
+  if (entry.kind === "artifact") {
+    return renderLeaderboardArtifactTraceEntry(entry, index);
+  }
+  return renderLeaderboardScoreTraceEntry(entry, index);
+}
+
+function renderLeaderboardArtifactTraceEntry(
+  entry: Extract<DecisionTraceEntry, { kind: "artifact" }>,
+  index: number
+): string {
+  const selectedId = entry.selectedIndex >= 0 ? entry.offeredIds[entry.selectedIndex] : undefined;
+  const selectedLabel = selectedId ? artifactDisplayName(selectedId) : "未选择";
+  return `
+    <li class="leaderboard-choice-entry">
+      <div>
+        <strong>${entry.discard ? "丢弃" : "遗物"} #${index + 1}</strong>
+        <small>${escapeHtml(entry.reason)} / 选中 ${escapeHtml(selectedLabel)}</small>
+      </div>
+      <div class="leaderboard-choice-options">
+        ${entry.offeredIds
+          .map(
+            (id, optionIndex) => `
+              <span class="${optionIndex === entry.selectedIndex ? "is-selected" : ""}">
+                ${optionIndex === entry.selectedIndex ? "<strong>选中</strong>" : ""}
+                ${escapeHtml(artifactDisplayName(id))}
+              </span>
+            `
+          )
+          .join("")}
+      </div>
+    </li>
+  `;
+}
+
+function renderLeaderboardScoreTraceEntry(entry: Extract<DecisionTraceEntry, { kind: "score" }>, index: number): string {
+  const value =
+    entry.mode === "onesDigit"
+      ? `个位 ${entry.value ?? "-"}`
+      : entry.swap
+        ? `${entry.swap[0]} <-> ${entry.swap[1]}`
+        : "不交换";
+  return `
+    <li class="leaderboard-choice-entry">
+      <div>
+        <strong>分数 #${index + 1}</strong>
+        <small>${SUBJECT_LABELS[entry.subject] ?? entry.subject} / 原分 ${formatNumber(entry.score)} / ${escapeHtml(value)}</small>
+      </div>
+    </li>
+  `;
+}
+
+function artifactDisplayName(id: string): string {
+  return findArtifact(id)?.name ?? id;
+}
+
+function shortCommit(commit: string): string {
+  return commit && commit !== "unknown" ? commit.slice(0, 12) : "unknown";
+}
+
+function formatBuildTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function renderFeedbackForm(): string {
+  return `
+    <div class="feedback-form">
+      <textarea data-field="feedback-message" maxlength="2000" rows="4" placeholder="问题或建议">${escapeHtml(state.feedback.message)}</textarea>
+      <input data-field="feedback-contact" type="text" maxlength="160" value="${escapeHtml(state.feedback.contact)}" placeholder="联系方式（可选）" />
+      <div class="service-actions">
+        <span data-feedback-status class="${state.feedback.status === "error" ? "service-error" : ""}">${escapeHtml(feedbackStatusText())}</span>
+        <button class="primary-button" type="button" data-action="submit-feedback" ${canSubmitFeedback() ? "" : "disabled"}>提交反馈</button>
+      </div>
+    </div>
+  `;
+}
+
+function leaderboardStatusText(): string {
+  if (state.leaderboard.status === "submitting") return "验分中";
+  if (state.leaderboard.status === "loading") return "读取中";
+  if (state.leaderboard.status === "error") return "暂不可用";
+  if (state.leaderboard.submittedRunId) return "已入榜";
+  return "未提交";
+}
+
+function feedbackStatusText(): string {
+  if (state.feedback.status === "submitting") return "提交中";
+  if (state.feedback.status === "sent") return "已收到";
+  if (state.feedback.status === "error") return state.feedback.error ?? "提交失败";
+  return "意见反馈";
+}
+
 function renderShareCardSubjectRows(result: RunResult): string {
   return [
     ...result.exams.map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`),
@@ -1409,7 +1802,7 @@ function renderSharedReport(report: SharedReport): string {
         <section class="share-card-preview" aria-label="分享战报">
           <div class="share-card-paper">
             <div class="share-card-head">
-              <div><span class="mono-label">REPORT CARD</span><strong>whitegiver-plus.github.io/GaokaoArtifact</strong></div>
+              <div><span class="mono-label">REPORT CARD</span><strong>${escapeHtml(siteDisplayUrl())}</strong></div>
               <span>YEAR ${report.year}</span>
             </div>
             <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(report.playerName)}</strong></div>
@@ -1463,6 +1856,7 @@ function renderFooter(): string {
           ${renderHelpDoc()}
         </div>
       </details>
+      ${renderFeedbackDock()}
       ${notice}
     </footer>
   `;
@@ -1476,14 +1870,19 @@ async function copyShareLink(): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
     showCopyToast("已复制");
+    trackEvent("share_copy", { score: Math.round(result.totalScore), year: result.year });
   } catch {
     showFooterNotice(text);
   }
 }
 
 function buildShareText(result: RunResult, link: string): string {
-  const playerName = state.playerName || "考生";
+  const playerName = publicPlayerName();
   return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，你也来试试吧：${link}`;
+}
+
+function publicPlayerName(): string {
+  return publicNickname(state.playerName);
 }
 
 async function downloadShareImage(): Promise<void> {
@@ -1499,9 +1898,109 @@ async function downloadShareImage(): Promise<void> {
     anchor.click();
     anchor.remove();
     showFooterNotice("战报图已下载。");
+    trackEvent("share_image_download", { score: Math.round(result.totalScore), year: result.year });
   } catch {
     showFooterNotice("战报图生成失败，请先复制战报链接。");
   }
+}
+
+async function refreshLeaderboard(silent = false): Promise<void> {
+  if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE) return;
+  if (!silent) {
+    state.leaderboard = { ...state.leaderboard, status: "loading", error: undefined };
+    render();
+  }
+  const response = await loadLeaderboard();
+  if (response.ok) {
+    state.leaderboard = {
+      ...state.leaderboard,
+      status: "ready",
+      entries: response.entries,
+      error: undefined
+    };
+  } else {
+    state.leaderboard = {
+      ...state.leaderboard,
+      status: "error",
+      error: response.error ?? "榜单暂不可用"
+    };
+  }
+  render();
+}
+
+function toggleLeaderboardDetail(runId: string): void {
+  state.leaderboard = {
+    ...state.leaderboard,
+    selectedRunId: state.leaderboard.selectedRunId === runId ? undefined : runId
+  };
+  trackEvent("leaderboard_detail_toggle", { open: state.leaderboard.selectedRunId === runId });
+  render();
+}
+
+async function submitLeaderboardEntry(): Promise<void> {
+  if (!state.result || DEBUG_ROUTE || RESULT_DEBUG_ROUTE) return;
+  if (state.leaderboard.status === "submitting") return;
+  state.leaderboard = { ...state.leaderboard, status: "submitting", error: undefined };
+  render();
+  const response = await verifyRun({
+    nickname: publicPlayerName(),
+    trace: state.decisionTrace,
+    clientResult: state.result
+  });
+  if (response.ok && response.entry) {
+    state.leaderboard = {
+      status: "ready",
+      entries: mergeLeaderboardEntry(response.entry, state.leaderboard.entries),
+      submittedRunId: response.entry.runId,
+      selectedRunId: response.entry.runId
+    };
+    showFooterNotice("分数已提交榜单。");
+    trackEvent("leaderboard_submit", { score: response.entry.score, year: response.entry.year });
+    void refreshLeaderboard(true);
+  } else {
+    state.leaderboard = {
+      ...state.leaderboard,
+      status: "error",
+      error: nicknameErrorMessage(response.error) ?? response.error ?? "提交失败"
+    };
+    trackEvent("leaderboard_submit_failed", { error: response.error ?? "unknown" });
+  }
+  render();
+}
+
+async function submitFeedbackMessage(): Promise<void> {
+  syncFeedbackStateFromDom();
+  const message = state.feedback.message.trim();
+  if (!message || state.feedback.status === "submitting") return;
+  state.feedback = { ...state.feedback, status: "submitting", error: undefined };
+  render();
+  const response = await submitFeedback({
+    nickname: publicPlayerName(),
+    contact: state.feedback.contact,
+    message,
+    page: window.location.pathname,
+    runId: state.leaderboard.submittedRunId,
+    seed: state.result?.seed ?? state.seed,
+    trace: state.decisionTrace
+  });
+  if (response.ok) {
+    state.feedback = { open: true, message: "", contact: state.feedback.contact, status: "sent" };
+    showFooterNotice("反馈已提交。");
+    trackEvent("feedback_submit", { hasContact: Boolean(state.feedback.contact), result: Boolean(state.result) });
+  } else {
+    state.feedback = {
+      ...state.feedback,
+      status: "error",
+      error: nicknameErrorMessage(response.error) ?? response.error ?? "提交失败"
+    };
+  }
+  render();
+}
+
+function mergeLeaderboardEntry(entry: LeaderboardEntry, entries: LeaderboardEntry[]): LeaderboardEntry[] {
+  return [entry, ...entries.filter((item) => item.runId !== entry.runId)]
+    .sort((left, right) => right.score - left.score || right.year - left.year || left.createdAt.localeCompare(right.createdAt))
+    .slice(0, 10);
 }
 
 async function createShareImageDataUrl(result: RunResult, link: string): Promise<string> {
@@ -1560,7 +2059,7 @@ function drawReportCanvas(
   context.fillRect(margin, margin, 34, height - margin * 2);
   context.fillStyle = "#111827";
   context.font = "900 30px 'Microsoft YaHei', sans-serif";
-  context.fillText("whitegiver-plus.github.io/GaokaoArtifact", 110, 128);
+  context.fillText(siteDisplayUrl(), 110, 128);
   context.font = "900 18px Consolas, monospace";
   context.fillStyle = "#6b7280";
   context.fillText(`SEED ${result.seed}`, 110, 164);
@@ -1575,7 +2074,7 @@ function drawReportCanvas(
 
   context.font = "800 26px 'Microsoft YaHei', sans-serif";
   context.fillStyle = "#374151";
-  context.fillText(`${state.playerName || "考生"} · 第 ${result.year} 年 · 录取线 ${formatNumber(result.threshold)}`, 112, 470);
+  context.fillText(`${publicPlayerName()} · 第 ${result.year} 年 · 录取线 ${formatNumber(result.threshold)}`, 112, 470);
 
   let y = 545;
   context.font = "900 24px 'Microsoft YaHei', sans-serif";
@@ -1671,10 +2170,20 @@ function sanitizeFilename(value: string): string {
 function buildShareUrl(result: RunResult): string {
   const params = new URLSearchParams({ r: encodeCompactShareReport(result) });
   const url = new URL(window.location.href);
+  const publicUrl = new URL(publicSiteUrl());
+  url.protocol = publicUrl.protocol;
+  url.host = publicUrl.host;
+  if (publicUrl.pathname !== "/") {
+    url.pathname = publicUrl.pathname;
+  }
   url.pathname = sharePathname(url.pathname);
   url.search = params.toString();
   url.hash = "";
   return url.toString();
+}
+
+function siteDisplayUrl(): string {
+  return publicSiteUrl().replace(/^https?:\/\//, "").replace(/\/+$/, "");
 }
 
 function readSharedReport(): SharedReport | undefined {
@@ -1701,7 +2210,7 @@ function encodeCompactShareReport(result: RunResult): string {
     .join("_");
   return [
     "2",
-    encodeBase64Url(state.playerName || "考生"),
+    encodeBase64Url(publicPlayerName()),
     encodeBase64Url(result.seed),
     encodeShareNumber(result.totalScore),
     encodeShareNumber(result.year),
@@ -1716,7 +2225,7 @@ function decodeCompactShareReport(value: string): SharedReport | undefined {
   if (version !== "2" || !playerName || !seed || !score || !year || !threshold) return undefined;
   const decodedSubjects = decodeShareSubjects(subjects);
   return {
-    playerName: decodeBase64Url(playerName),
+    playerName: publicNickname(decodeBase64Url(playerName)),
     seed: decodeBase64Url(seed),
     score: decodeShareNumber(score),
     year: Math.max(1, decodeShareNumber(year)),
@@ -1795,7 +2304,7 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
   if (!value || typeof value !== "object") return undefined;
   if (isCompactSharedReport(value)) {
     return {
-      playerName: value.p,
+      playerName: publicNickname(value.p),
       seed: value.s,
       score: Math.round(value.n),
       year: Math.max(1, Math.round(value.y)),
@@ -1827,7 +2336,7 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
     return undefined;
   }
   return {
-    playerName: report.playerName,
+    playerName: publicNickname(report.playerName),
     seed: report.seed,
     score: Math.round(report.score),
     year: Math.max(1, Math.round(report.year)),
@@ -2170,6 +2679,10 @@ function resetRunState(): void {
   restoreDefaultSpeed();
 }
 
+function resetServiceState(): void {
+  state.leaderboard = { status: "idle", entries: [] };
+}
+
 function openRestartConfirm(): void {
   if (state.restartConfirm) return;
   state.restartConfirm = { resumeAutoPlay: state.autoPlay };
@@ -2197,6 +2710,8 @@ function resetToStart(newSeed: boolean): void {
   state.runId += 1;
   if (newSeed) state.seed = defaultSeed();
   resetRunState();
+  state.decisionTrace = createDecisionTrace();
+  resetServiceState();
   state.phase = "start";
   render();
 }
@@ -2205,9 +2720,11 @@ function resetResultDebug(): void {
   const result = createResultDebugRun();
   state.runId += 1;
   resetRunState();
+  state.decisionTrace = createDecisionTrace();
+  resetServiceState();
   state.phase = "result";
   state.seed = result.seed;
-  state.playerName = "结算页调试";
+  state.playerName = DEBUG_NICKNAME;
   state.subjects = result.subjects;
   state.artifacts = artifactsForResult(result);
   state.exams = result.exams;
@@ -2226,6 +2743,8 @@ async function restartRun(newSeed: boolean): Promise<void> {
   state.endlessYear = 1;
   state.scoreThreshold = 750;
   resetRunState();
+  state.decisionTrace = createDecisionTrace();
+  resetServiceState();
   state.phase = "loading";
   render();
   const runId = state.runId;
@@ -2236,6 +2755,8 @@ async function restartRun(newSeed: boolean): Promise<void> {
     initialArtifacts,
     autoPolicy: initialArtifacts ? "first" as const : undefined
   };
+  startDecisionTraceRun("standard", options.seed, options.subjects, 1, 750);
+  trackEvent("run_start", { seed: options.seed, subjects: options.subjects });
 
   await runGame(LOCAL_ARTIFACTS, options, createRunHooks(runId));
   if (isCurrentRun(runId)) render();
@@ -2267,9 +2788,58 @@ async function continueEndlessRun(): Promise<void> {
     preExamDrafts: true,
     postExamDrafts: false
   };
+  startDecisionTraceRun("endless", options.seed, options.subjects, options.year, options.threshold);
+  trackEvent("endless_start", { seed: options.seed, year: options.year, threshold: options.threshold });
 
   await runGame(LOCAL_ARTIFACTS, options, createRunHooks(runId));
   if (isCurrentRun(runId)) render();
+}
+
+function startDecisionTraceRun(
+  mode: "standard" | "endless",
+  seed: string,
+  subjects: SubjectId[],
+  year: number,
+  threshold: number
+): void {
+  if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE) return;
+  state.decisionTrace.runs.push(createDecisionTraceRun(mode, seed, subjects, year, threshold));
+}
+
+function currentDecisionRun() {
+  return state.decisionTrace.runs[state.decisionTrace.runs.length - 1];
+}
+
+function recordArtifactDecision(choices: ArtifactConfig[], reason: string, discard: boolean, selectedIndex: number): void {
+  const run = currentDecisionRun();
+  if (!run) return;
+  run.entries.push({
+    kind: "artifact",
+    discard,
+    reason,
+    offeredIds: choices.map((choice) => choice.id),
+    selectedIndex
+  });
+}
+
+function recordScoreDecision(
+  prompt: Omit<ScoreChoicePrompt, "resolve">,
+  value: number | [number, number] | undefined
+): void {
+  const run = currentDecisionRun();
+  if (!run) return;
+  const entry: ScoreDecisionEntry = {
+    kind: "score",
+    mode: prompt.mode,
+    subject: prompt.subject,
+    score: prompt.score
+  };
+  if (typeof value === "number") {
+    entry.value = value;
+  } else if (Array.isArray(value)) {
+    entry.swap = value;
+  }
+  run.entries.push(entry);
 }
 
 function createRunHooks(runId: number): ChoiceHooks {
@@ -2414,6 +2984,16 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.examSettlement = undefined;
       restoreDefaultSpeed();
       state.phase = "result";
+      trackEvent("run_end", {
+        seed: result.seed,
+        score: Math.round(result.totalScore),
+        year: result.year,
+        threshold: result.threshold,
+        artifactCount: result.artifactIds.length,
+        trace: state.decisionTrace
+      });
+      void flushEvents();
+      void refreshLeaderboard(true);
     }
   };
 }
@@ -2437,6 +3017,12 @@ function promptChoice(
       discard,
       sequence,
       resolve: (index) => {
+        recordArtifactDecision(choices, reason, discard, index);
+        trackEvent(discard ? "artifact_discarded" : "artifact_selected", {
+          reason,
+          selectedIndex: index,
+          offeredIds: choices.map((choice) => choice.id)
+        });
         state.choicePrompt = undefined;
         resolve(index);
         render();
@@ -2488,6 +3074,13 @@ function promptScoreChoice(
     state.scoreChoicePrompt = {
       ...prompt,
       resolve: (value) => {
+        recordScoreDecision(prompt, value);
+        trackEvent("score_choice", {
+          mode: prompt.mode,
+          subject: prompt.subject,
+          score: prompt.score,
+          value: Array.isArray(value) ? value.join(",") : value
+        });
         state.scoreChoicePrompt = undefined;
         resolve(value);
         render();

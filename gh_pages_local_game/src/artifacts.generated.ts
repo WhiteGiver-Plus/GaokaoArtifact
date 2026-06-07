@@ -771,7 +771,7 @@ export const LOCAL_ARTIFACTS = [
       "高正确率",
       "前期题"
     ],
-    "description": "每场考试前 2 题，正确率 +100%。",
+    "description": "每场考试前 2 题，正确率 +1000%。",
     "modifiers": [],
     "triggers": [
       {
@@ -784,7 +784,7 @@ export const LOCAL_ARTIFACTS = [
         "effects": [
           {
             "op": "addQuestionAccuracy",
-            "value": 100
+            "value": 10020
           }
         ]
       }
@@ -1592,12 +1592,12 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "hundred_day_oath",
-    "name": "百日誓师",
+    "name": "暂时不能给你明确的答复",
     "rarity": "common",
     "tags": [
       "无效遗物"
     ],
-    "description": "无任何效果。",
+    "description": "暂时不能给你明确的效果。",
     "modifiers": [],
     "triggers": [],
     "maxCopies": 1,
@@ -1605,11 +1605,10 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "nonsense_master",
-    "name": "废话文学大师",
+    "name": "废话文学领域大神",
     "rarity": "rare",
     "tags": [
-      "无效遗物",
-      "分数补偿"
+      "无效遗物"
     ],
     "description": "每科考试结束时，按无效遗物数量使本场考试最终得分增加：1/2/3/4+ 件对应 20/100/1000/5000。",
     "modifiers": [],
@@ -1699,7 +1698,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "lucky_coin",
-    "name": "幸运币",
+    "name": "这个机遇不可特意去求!",
     "rarity": "rare",
     "tags": [
       "幸运方块"

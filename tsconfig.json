@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "outDir": "dist"
   },
-  "include": ["gh_pages_local_game/**/*.ts"]
+  "include": ["gh_pages_local_game/**/*.ts", "api/**/*.ts"]
 }
