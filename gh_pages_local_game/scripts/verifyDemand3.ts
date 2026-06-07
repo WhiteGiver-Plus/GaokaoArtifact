@@ -56,6 +56,15 @@ async function verifyProcessPoints(artifactConfigs: ArtifactConfig[]): Promise<v
 }
 
 async function verifyChainBonus(artifactConfigs: ArtifactConfig[]): Promise<void> {
+  const chainOnly = await runGame(artifactConfigs, {
+    seed: "demand3-chain-only",
+    initialArtifacts: ["chain_is_method"],
+    initialArtifactMode: "load",
+    carryoverStats: { baseAccuracy: 0 },
+    subjects: ["chinese", "math", "english", "physics", "chemistry", "biology"],
+    postExamDrafts: false,
+    openingDrafts: 0
+  });
   const result = await runGame(artifactConfigs, {
     seed: "demand3-chain",
     initialArtifacts: ["process_points", "chain_is_method"],
@@ -67,8 +76,12 @@ async function verifyChainBonus(artifactConfigs: ArtifactConfig[]): Promise<void
   });
 
   assert(
-    result.exams[0].score === 75,
-    "chain_is_method should add 60 final-score points on top of 15 process points"
+    chainOnly.exams[0].score === 0,
+    "chain_is_method should not add score when no prior question artifact triggered"
+  );
+  assert(
+    result.exams[0].score === 45,
+    "chain_is_method should add 30 final-score points on top of 15 process points"
   );
 }
 

@@ -852,16 +852,8 @@ function renderPaperStatusTile(label: string, value: string, key: keyof LiveExam
 
 function renderScoreBankFloat(event: VisualEvent): string {
   if (!event.scoreBanking || !event.settling || typeof event.scoreDelta !== "number") return "";
-  const detail = event.detailText ? escapeHtml(event.detailText) : `分数 ${formatDelta(event.scoreDelta)}`;
-  const ledger = event.examScoreBefore !== undefined && event.examScoreAfter !== undefined
-    ? `<em>${formatNumber(event.examScoreBefore)} -> ${formatNumber(event.examScoreAfter)}</em>`
-    : "";
   return `
-    <b class="score-bank-float bank-${event.intensity}" aria-hidden="true">
-      <strong>入账 ${formatDelta(event.scoreDelta)}</strong>
-      <small>${detail}</small>
-      ${ledger}
-    </b>
+    <b class="score-bank-float bank-${event.intensity}" aria-hidden="true">${formatDelta(event.scoreDelta)}</b>
   `;
 }
 
@@ -997,7 +989,7 @@ function renderTriggerOverlay(): string {
     ? `分数 ${formatDelta(scoreDelta)}`
     : delta ? `${escapeHtml(delta.label)} ${formatDelta(delta.value, delta.key)}` : event.effectText ? escapeHtml(event.effectText) : "";
   const label = event.settling && event.scoreBanking && typeof scoreDelta === "number"
-    ? `入账 ${formatDelta(scoreDelta)}`
+    ? formatDelta(scoreDelta)
     : event.label;
   const ledger = event.scoreBanking && event.examScoreBefore !== undefined && event.examScoreAfter !== undefined
     ? `<em>科目分 ${formatNumber(event.examScoreBefore)} -> ${formatNumber(event.examScoreAfter)}</em>`

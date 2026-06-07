@@ -46,7 +46,10 @@ export async function applyEffect(
       return;
     case "addExamPostBonusByQuestionTriggerCount": {
       const currentExam = requireExam(effect.op, exam);
-      const bonus = Math.min(effect.cap, Math.pow(effect.base, currentExam.currentQuestionTriggerCount));
+      // executeTrigger increments the counter before effects run; reward only prior triggers.
+      const priorTriggerCount = Math.max(0, currentExam.currentQuestionTriggerCount - 1);
+      if (priorTriggerCount <= 0) return;
+      const bonus = Math.min(effect.cap, Math.pow(effect.base, priorTriggerCount));
       currentExam.examPostBonus += bonus;
       return;
     }
