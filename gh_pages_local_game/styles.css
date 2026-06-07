@@ -3060,6 +3060,63 @@
   animation: banner-snap 220ms ease;
 }
 
+.restart-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(4px);
+}
+
+.restart-confirm-panel {
+  width: min(390px, 100%);
+  border: 2px solid #111827;
+  border-radius: 8px;
+  padding: 16px;
+  color: #111827;
+  background:
+    linear-gradient(90deg, rgba(217, 52, 43, 0.1) 0 24px, transparent 24px),
+    repeating-linear-gradient(0deg, transparent 0 27px, rgba(37, 99, 235, 0.08) 28px),
+    #fff;
+  box-shadow: 8px 8px rgba(17, 24, 39, 0.22);
+  animation: banner-snap 200ms ease;
+}
+
+.restart-confirm-head {
+  display: grid;
+  gap: 4px;
+  padding-left: 24px;
+}
+
+.restart-confirm-head h2 {
+  margin: 0;
+  font-size: clamp(24px, 6vw, 34px);
+  line-height: 1.05;
+}
+
+.restart-confirm-panel > p {
+  margin: 10px 0 14px 24px;
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.restart-confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-left: 24px;
+}
+
+.restart-confirm-actions .primary-button,
+.restart-confirm-actions .secondary-button {
+  width: 100%;
+  min-height: 40px;
+}
+
 .score-choice-head {
   display: grid;
   gap: 4px;
@@ -3294,6 +3351,19 @@
     padding: 12px;
   }
 
+  .restart-confirm-backdrop {
+    padding: 12px;
+    place-items: end center;
+  }
+
+  .restart-confirm-panel {
+    padding: 12px;
+  }
+
+  .restart-confirm-actions {
+    grid-template-columns: 1fr;
+  }
+
   .score-choice-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 7px;
@@ -3444,8 +3514,15 @@
 }
 
 .exam-icon-button.is-restart {
-  color: #991b1b;
-  border-color: #991b1b;
+  color: #fff;
+  border-color: #dc2626;
+  background: #dc2626;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.exam-icon-button.is-restart:hover {
+  background: #b91c1c;
+  box-shadow: 0 7px 16px rgba(220, 38, 38, 0.28);
 }
 
 .exam-icon-button.is-skip {
@@ -3517,23 +3594,31 @@
 }
 
 .geo-restart {
-  border: 2px solid currentColor;
+  width: 24px;
+  height: 24px;
+}
+
+.geo-restart:before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 2.5px solid currentColor;
   border-left-color: transparent;
   border-radius: 50%;
-  transform: rotate(-38deg);
+  transform: rotate(-40deg);
 }
 
 .geo-restart:after {
   content: "";
   position: absolute;
-  top: -3px;
-  right: -1px;
-  width: 0;
-  height: 0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 6px solid currentColor;
-  transform: rotate(38deg);
+  top: 3px;
+  left: 3px;
+  width: 8px;
+  height: 8px;
+  border-top: 2.5px solid currentColor;
+  border-left: 2.5px solid currentColor;
+  transform: rotate(-30deg);
+  transform-origin: center;
 }
 
 .geo-skip:before,

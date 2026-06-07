@@ -61,6 +61,10 @@ interface ScoreChoiceOption {
   delta: number;
 }
 
+interface RestartConfirm {
+  resumeAutoPlay: boolean;
+}
+
 interface VisualEvent {
   id: string;
   label: string;
@@ -128,6 +132,7 @@ interface UiState {
   result?: RunResult;
   sharedReport?: SharedReport;
   scoreChoicePrompt?: ScoreChoicePrompt;
+  restartConfirm?: RestartConfirm;
   endlessActive: boolean;
   endlessYear: number;
   scoreThreshold: number;
@@ -238,6 +243,14 @@ root.addEventListener("click", (event) => {
     void downloadShareImage();
     return;
   }
+  if (action === "cancel-restart") {
+    cancelRestartConfirm();
+    return;
+  }
+  if (action === "confirm-restart") {
+    confirmRestart();
+    return;
+  }
   if (action === "add-debug-artifact") {
     const id = target.closest<HTMLElement>("[data-artifact-id]")?.dataset.artifactId;
     if (id) addDebugArtifact(id);
@@ -255,7 +268,11 @@ root.addEventListener("click", (event) => {
     return;
   }
   if (action === "restart") {
-    resetToStart(true);
+    if (state.phase === "exam" && state.activeExam) {
+      openRestartConfirm();
+    } else {
+      resetToStart(true);
+    }
     return;
   }
   if (action === "reset-result-debug") {
@@ -305,6 +322,12 @@ root.addEventListener("input", (event) => {
 });
 
 root.addEventListener("keydown", (event) => {
+  if (state.restartConfirm && event.key === "Escape") {
+    event.preventDefault();
+    cancelRestartConfirm();
+    return;
+  }
+
   const input = event.target as HTMLInputElement;
   if (input.dataset.field !== "debug-search" || event.key !== "Enter") return;
   event.preventDefault();
@@ -330,6 +353,7 @@ function render(): void {
     <div class="app-shell fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""} ${pausedClass}">
       <main class="paper-field">${renderPhase()}</main>
       ${renderScoreChoicePrompt()}
+      ${renderRestartConfirm()}
       ${renderCopyToast()}
       ${renderFooter()}
     </div>
@@ -377,6 +401,25 @@ function renderCopyToast(): string {
     <div class="copy-toast" role="status" aria-live="polite">
       <strong>${escapeHtml(state.copyToast)}</strong>
     </div>
+  `;
+}
+
+function renderRestartConfirm(): string {
+  if (!state.restartConfirm) return "";
+  return `
+    <section class="restart-confirm-backdrop" role="dialog" aria-modal="true" aria-label="确认重开">
+      <article class="restart-confirm-panel">
+        <div class="restart-confirm-head">
+          <p class="mono-label">RESTART</p>
+          <h2>确认重开？</h2>
+        </div>
+        <p>进度会全部清空,回到开始页面。</p>
+        <div class="restart-confirm-actions">
+          <button class="secondary-button" type="button" data-action="cancel-restart">取消</button>
+          <button class="primary-button" type="button" data-action="confirm-restart">确认重开</button>
+        </div>
+      </article>
+    </section>
   `;
 }
 
@@ -2123,7 +2166,31 @@ function resetRunState(): void {
   state.result = undefined;
   state.sharedReport = undefined;
   state.scoreChoicePrompt = undefined;
+  state.restartConfirm = undefined;
   restoreDefaultSpeed();
+}
+
+function openRestartConfirm(): void {
+  if (state.restartConfirm) return;
+  state.restartConfirm = { resumeAutoPlay: state.autoPlay };
+  state.autoPlay = false;
+  wakePlaybackDelays();
+  render();
+}
+
+function cancelRestartConfirm(): void {
+  const resumeAutoPlay = state.restartConfirm?.resumeAutoPlay;
+  state.restartConfirm = undefined;
+  if (resumeAutoPlay) {
+    state.autoPlay = true;
+    wakePlaybackDelays();
+  }
+  render();
+}
+
+function confirmRestart(): void {
+  state.restartConfirm = undefined;
+  resetToStart(true);
 }
 
 function resetToStart(newSeed: boolean): void {
