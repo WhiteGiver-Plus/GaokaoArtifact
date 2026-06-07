@@ -1,8 +1,10 @@
 import QRCode from "qrcode";
 import { toPng } from "html-to-image";
 import {
+  createShareReport,
   flushEvents,
   loadLeaderboard,
+  loadShareReport,
   publicSiteUrl,
   submitFeedback,
   trackEvent,
@@ -28,12 +30,10 @@ import {
 import {
   createDecisionTrace,
   createDecisionTraceRun,
-  type AppVersionInfo,
   type DecisionTrace,
-  type DecisionTraceEntry,
-  type DecisionTraceRun,
   type LeaderboardEntry,
-  type ScoreDecisionEntry
+  type ScoreDecisionEntry,
+  type ShareReportPayload
 } from "./core/trace.js";
 import {
   DEBUG_NICKNAME,
@@ -91,12 +91,17 @@ interface RestartConfirm {
 }
 
 type ServiceStatus = "idle" | "loading" | "submitting" | "ready" | "sent" | "error";
+type LeaderboardBoard = "standard" | "endless";
 
 interface LeaderboardState {
   status: ServiceStatus;
-  entries: LeaderboardEntry[];
+  standardEntries: LeaderboardEntry[];
+  endlessEntries: LeaderboardEntry[];
   submittedRunId?: string;
+  submittedRank?: number;
   selectedRunId?: string;
+  shareLink?: string;
+  shareText?: string;
   error?: string;
 }
 
@@ -130,15 +135,18 @@ interface VisualEvent {
   settling?: boolean;
 }
 
-interface SharedReport {
-  playerName: string;
-  seed: string;
-  score: number;
-  year: number;
-  threshold: number;
-  title: string;
-  subjects: Array<{ label: string; score: string; scoreValue?: number }>;
-  artifacts: string[];
+type SharedReport = ShareReportPayload;
+
+interface ShareCache {
+  signature: string;
+  url?: string;
+  promise?: Promise<string>;
+}
+
+interface ShareUrlOptions {
+  source?: "result" | "leaderboard";
+  runId?: string;
+  rank?: number;
 }
 
 interface StatDelta {
@@ -174,6 +182,9 @@ interface UiState {
   settlementContinue?: () => void;
   result?: RunResult;
   sharedReport?: SharedReport;
+  sharedReportCode?: string;
+  sharedReportStatus: ServiceStatus;
+  shareCache?: ShareCache;
   scoreChoicePrompt?: ScoreChoicePrompt;
   restartConfirm?: RestartConfirm;
   endlessActive: boolean;
@@ -195,6 +206,7 @@ interface UiState {
 
 const RESULT_DEBUG_RUN = RESULT_DEBUG_ROUTE ? createResultDebugRun() : undefined;
 const RESULT_DEBUG_ARTIFACTS = RESULT_DEBUG_RUN ? artifactsForResult(RESULT_DEBUG_RUN) : [];
+const INITIAL_SHARED_REPORT_CODE = RESULT_DEBUG_ROUTE ? undefined : readShareCodeFromUrl();
 
 const state: UiState = {
   runId: 0,
@@ -220,6 +232,8 @@ const state: UiState = {
   draftSequence: 0,
   result: RESULT_DEBUG_RUN,
   sharedReport: RESULT_DEBUG_ROUTE ? undefined : readSharedReport(),
+  sharedReportCode: INITIAL_SHARED_REPORT_CODE,
+  sharedReportStatus: INITIAL_SHARED_REPORT_CODE ? "loading" : "idle",
   endlessActive: Boolean(RESULT_DEBUG_RUN),
   endlessYear: RESULT_DEBUG_RUN?.year ?? 1,
   scoreThreshold: RESULT_DEBUG_RUN?.threshold ?? 750,
@@ -231,7 +245,7 @@ const state: UiState = {
   debugSearchInput: "",
   debugSearch: "",
   decisionTrace: createDecisionTrace(),
-  leaderboard: { status: "idle", entries: [] },
+  leaderboard: { status: "idle", standardEntries: [], endlessEntries: [] },
   feedback: { open: false, message: "", contact: "", status: "idle" }
 };
 
@@ -290,6 +304,10 @@ root.addEventListener("click", (event) => {
   }
   if (action === "copy-share-link") {
     void copyShareLink();
+    return;
+  }
+  if (action === "copy-leaderboard-share") {
+    void copyLeaderboardShare();
     return;
   }
   if (action === "download-share-image") {
@@ -460,6 +478,7 @@ root.addEventListener("keydown", (event) => {
 window.addEventListener("resize", syncColumnHeights);
 
 render();
+void loadInitialSharedReport();
 trackEvent("page_view", { debug: DEBUG_ROUTE, resultDebug: RESULT_DEBUG_ROUTE });
 
 function render(): void {
@@ -504,6 +523,7 @@ function requireElement(id: string): HTMLElement {
 }
 
 function renderPhase(): string {
+  if (state.phase === "start" && state.sharedReportStatus === "loading") return renderLoading();
   if (state.sharedReport && state.phase === "start") return renderSharedReport(state.sharedReport);
   if (state.phase === "start") return renderStart();
   if (state.phase === "draft" && state.choicePrompt) return renderDraft(state.choicePrompt);
@@ -541,7 +561,7 @@ function renderRestartConfirm(): string {
 }
 
 async function hydrateShareQRCodes(): Promise<void> {
-  const link = state.result ? buildShareUrl(state.result) : window.location.href;
+  const link = state.result ? await resolveShareUrl(state.result) : window.location.href;
   await hydrateShareQRCodesIn(root, link);
 }
 
@@ -1122,7 +1142,7 @@ function renderExamToolDock(): string {
         <span class="geo-icon ${state.autoPlay ? "geo-pause" : "geo-play"}" aria-hidden="true"></span>
       </button>
       <button class="exam-icon-button is-restart" type="button" data-action="restart" aria-label="重开" title="重开">
-        <span class="geo-icon geo-restart" aria-hidden="true"></span>
+        ${renderRestartIcon()}
       </button>
       <button class="exam-icon-button is-speed speed-tier-${state.speedMultiplier}" type="button" data-action="cycle-speed" aria-label="加速 ${state.speedMultiplier}x" title="加速 ${state.speedMultiplier}x">
         <span class="speed-pips" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -1131,6 +1151,15 @@ function renderExamToolDock(): string {
         <span class="geo-icon geo-skip" aria-hidden="true"></span>
       </button>
     </div>
+  `;
+}
+
+function renderRestartIcon(): string {
+  return `
+    <svg class="restart-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path fill="currentColor" fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+      <path fill="currentColor" d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+    </svg>
   `;
 }
 
@@ -1452,12 +1481,13 @@ function renderResult(result: RunResult): string {
 function renderShareCard(result: RunResult, title: string): string {
   const totalScoreText = formatNumber(result.totalScore);
   const thresholdText = formatNumber(result.threshold);
+  const rank = state.leaderboard.submittedRank;
   return `
     <section class="share-card-preview" aria-label="分享卡片预览">
       <div class="share-card-paper">
         <div class="share-card-head">
           <div><span class="mono-label">REPORT CARD</span><strong>${escapeHtml(siteDisplayUrl())}</strong></div>
-          <span>${result.year > 1 ? `YEAR ${result.year}` : "本地战报"}</span>
+          <span>${rank ? `榜单 #${rank}` : result.year > 1 ? `YEAR ${result.year}` : "本地战报"}</span>
         </div>
         <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(publicPlayerName())}</strong></div>
         <div class="share-card-score-row">
@@ -1471,6 +1501,7 @@ function renderShareCard(result: RunResult, title: string): string {
           <span>SEED ${escapeHtml(result.seed)}</span>
           <span>录取线 ${thresholdText}</span>
         </div>
+        ${rank ? `<div class="share-card-rank"><span>榜单排名</span><strong>#${rank}</strong></div>` : ""}
         <div class="share-card-hand"><span>无尽年</span><strong>${result.year}</strong></div>
         <div class="share-card-subjects">
           ${renderShareCardSubjectRows(result)}
@@ -1531,8 +1562,24 @@ function renderServicesPanel(): string {
           <button class="primary-button" type="button" data-action="submit-leaderboard" ${state.leaderboard.status === "submitting" ? "disabled" : ""}>提交分数</button>
         </div>
       </div>
+      ${renderLeaderboardShareBox()}
       ${renderLeaderboardRows()}
     </section>
+  `;
+}
+
+function renderLeaderboardShareBox(): string {
+  if (!state.leaderboard.shareText) return "";
+  const rankText = state.leaderboard.submittedRank ? `当前第 ${state.leaderboard.submittedRank} 名` : "已生成";
+  return `
+    <div class="leaderboard-share-box">
+      <div>
+        <span class="mono-label">RANKED SHARE</span>
+        <strong>${escapeHtml(rankText)}</strong>
+        <small>${escapeHtml(state.leaderboard.shareLink ?? "")}</small>
+      </div>
+      <button class="secondary-button" type="button" data-action="copy-leaderboard-share">复制排名文案</button>
+    </div>
   `;
 }
 
@@ -1560,47 +1607,53 @@ function renderLeaderboardRows(): string {
   if (state.leaderboard.status === "error") {
     return `<div class="service-empty service-error">${escapeHtml(state.leaderboard.error ?? "榜单暂不可用")}</div>`;
   }
-  if (state.leaderboard.entries.length === 0) {
-    return `<div class="service-empty">暂无榜单记录</div>`;
-  }
   return `
-    <ol class="leaderboard-list">
-      ${state.leaderboard.entries
-        .map(
-          (entry, index) => `
-            <li class="${entry.runId === state.leaderboard.submittedRunId ? "current-entry" : ""}">
-              <button class="leaderboard-row" type="button" data-leaderboard-run="${escapeAttr(entry.runId)}" aria-expanded="${state.leaderboard.selectedRunId === entry.runId ? "true" : "false"}">
-                <span>${index + 1}</span>
-                <strong>${escapeHtml(entry.nickname)}</strong>
-                <em>${formatNumber(entry.score)}</em>
-                <small>Y${entry.year} / ${entry.artifactCount} 件</small>
-              </button>
-              ${state.leaderboard.selectedRunId === entry.runId ? renderLeaderboardDetail(entry) : ""}
-            </li>
-          `
-        )
-        .join("")}
-    </ol>
+    <div class="leaderboard-boards">
+      ${renderLeaderboardBoard("standard", "第一年榜", state.leaderboard.standardEntries)}
+      ${renderLeaderboardBoard("endless", "无尽榜", state.leaderboard.endlessEntries)}
+    </div>
   `;
 }
 
-function renderLeaderboardDetail(entry: LeaderboardEntry): string {
+function renderLeaderboardBoard(board: LeaderboardBoard, title: string, entries: LeaderboardEntry[]): string {
+  return `
+    <section class="leaderboard-board" aria-label="${escapeAttr(title)}">
+      <div class="leaderboard-board-head">
+        <strong>${escapeHtml(title)}</strong>
+      </div>
+      ${
+        entries.length
+          ? `<ol class="leaderboard-list">
+              ${entries.map((entry, index) => renderLeaderboardRow(entry, index, board)).join("")}
+            </ol>`
+          : `<div class="service-empty">暂无榜单记录</div>`
+      }
+    </section>
+  `;
+}
+
+function renderLeaderboardRow(entry: LeaderboardEntry, index: number, board: LeaderboardBoard): string {
+  return `
+    <li class="${entry.runId === state.leaderboard.submittedRunId ? "current-entry" : ""}">
+      <button class="leaderboard-row" type="button" data-leaderboard-run="${escapeAttr(entry.runId)}" aria-expanded="${state.leaderboard.selectedRunId === entry.runId ? "true" : "false"}">
+        <span>${entry.rank ?? index + 1}</span>
+        <strong>${escapeHtml(entry.nickname)}</strong>
+        <em>${formatNumber(entry.score)}</em>
+        <small>${board === "endless" ? `Y${entry.year}` : "第一年"}</small>
+      </button>
+      ${state.leaderboard.selectedRunId === entry.runId ? renderLeaderboardDetail(entry, board) : ""}
+    </li>
+  `;
+}
+
+function renderLeaderboardDetail(entry: LeaderboardEntry, board: LeaderboardBoard): string {
   const share = entry.share;
   const exams = share?.exams ?? [];
   const artifactNames = share?.artifactNames ?? [];
-  const versionInfo = share?.appVersion ?? entry.appVersion;
   return `
     <div class="leaderboard-detail">
-      <div class="leaderboard-detail-meta">
-        <span>SEED <strong>${escapeHtml(share?.seed ?? entry.seed)}</strong></span>
-        <span>录取线 <strong>${formatNumber(share?.threshold ?? entry.threshold)}</strong></span>
-        <span>总分 <strong>${formatNumber(share?.totalScore ?? entry.score)}</strong></span>
-      </div>
-      <div class="leaderboard-detail-version">
-        ${renderLeaderboardVersion(versionInfo)}
-      </div>
       ${
-        exams.length
+        board === "standard" && exams.length
           ? `<div class="leaderboard-detail-scores">
               ${exams
                 .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`)
@@ -1615,121 +1668,8 @@ function renderLeaderboardDetail(entry: LeaderboardEntry): string {
             </div>`
           : `<div class="service-empty">暂无战报详情</div>`
       }
-      ${renderLeaderboardTrace(share?.trace)}
     </div>
   `;
-}
-
-function renderLeaderboardVersion(info?: AppVersionInfo): string {
-  if (!info) {
-    return `<span>版本 <strong>旧记录</strong></span>`;
-  }
-  return `
-    <span>版本 <strong>${escapeHtml(info.packageVersion)}</strong></span>
-    <span>提交 <strong>${escapeHtml(shortCommit(info.commit))}</strong></span>
-    <span>构建 <strong>${escapeHtml(formatBuildTime(info.buildTime))}</strong></span>
-  `;
-}
-
-function renderLeaderboardTrace(trace?: DecisionTrace): string {
-  if (!trace?.runs?.length) return "";
-  const choiceCount = trace.runs.reduce((total, run) => total + run.entries.length, 0);
-  return `
-    <div class="leaderboard-detail-trace">
-      <div class="leaderboard-detail-section-title">
-        <strong>完整选择</strong>
-        <span>Trace v${trace.version} / ${choiceCount} 条</span>
-      </div>
-      ${trace.runs.map((run, index) => renderLeaderboardTraceRun(run, index)).join("")}
-    </div>
-  `;
-}
-
-function renderLeaderboardTraceRun(run: DecisionTraceRun, index: number): string {
-  const subjectText = run.subjects.map((subject) => SUBJECT_LABELS[subject] ?? subject).join(" / ");
-  const title = run.mode === "endless" ? `第 ${run.year} 年` : index === 0 ? "首年" : `第 ${run.year} 年`;
-  return `
-    <div class="leaderboard-trace-run">
-      <div class="leaderboard-trace-run-head">
-        <strong>${escapeHtml(title)}</strong>
-        <span>${escapeHtml(run.seed)}</span>
-        <small>${escapeHtml(subjectText)} / 线 ${formatNumber(run.threshold)}</small>
-      </div>
-      ${
-        run.entries.length
-          ? `<ol class="leaderboard-choice-list">
-              ${run.entries.map((entry, entryIndex) => renderLeaderboardTraceEntry(entry, entryIndex)).join("")}
-            </ol>`
-          : `<div class="service-empty">本段没有选择记录</div>`
-      }
-    </div>
-  `;
-}
-
-function renderLeaderboardTraceEntry(entry: DecisionTraceEntry, index: number): string {
-  if (entry.kind === "artifact") {
-    return renderLeaderboardArtifactTraceEntry(entry, index);
-  }
-  return renderLeaderboardScoreTraceEntry(entry, index);
-}
-
-function renderLeaderboardArtifactTraceEntry(
-  entry: Extract<DecisionTraceEntry, { kind: "artifact" }>,
-  index: number
-): string {
-  const selectedId = entry.selectedIndex >= 0 ? entry.offeredIds[entry.selectedIndex] : undefined;
-  const selectedLabel = selectedId ? artifactDisplayName(selectedId) : "未选择";
-  return `
-    <li class="leaderboard-choice-entry">
-      <div>
-        <strong>${entry.discard ? "丢弃" : "遗物"} #${index + 1}</strong>
-        <small>${escapeHtml(entry.reason)} / 选中 ${escapeHtml(selectedLabel)}</small>
-      </div>
-      <div class="leaderboard-choice-options">
-        ${entry.offeredIds
-          .map(
-            (id, optionIndex) => `
-              <span class="${optionIndex === entry.selectedIndex ? "is-selected" : ""}">
-                ${optionIndex === entry.selectedIndex ? "<strong>选中</strong>" : ""}
-                ${escapeHtml(artifactDisplayName(id))}
-              </span>
-            `
-          )
-          .join("")}
-      </div>
-    </li>
-  `;
-}
-
-function renderLeaderboardScoreTraceEntry(entry: Extract<DecisionTraceEntry, { kind: "score" }>, index: number): string {
-  const value =
-    entry.mode === "onesDigit"
-      ? `个位 ${entry.value ?? "-"}`
-      : entry.swap
-        ? `${entry.swap[0]} <-> ${entry.swap[1]}`
-        : "不交换";
-  return `
-    <li class="leaderboard-choice-entry">
-      <div>
-        <strong>分数 #${index + 1}</strong>
-        <small>${SUBJECT_LABELS[entry.subject] ?? entry.subject} / 原分 ${formatNumber(entry.score)} / ${escapeHtml(value)}</small>
-      </div>
-    </li>
-  `;
-}
-
-function artifactDisplayName(id: string): string {
-  return findArtifact(id)?.name ?? id;
-}
-
-function shortCommit(commit: string): string {
-  return commit && commit !== "unknown" ? commit.slice(0, 12) : "unknown";
-}
-
-function formatBuildTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function renderFeedbackForm(): string {
@@ -1792,6 +1732,7 @@ function resultScoreAdjustment(result: RunResult): number {
 function renderSharedReport(report: SharedReport): string {
   const scoreText = formatNumber(report.score);
   const thresholdText = formatNumber(report.threshold);
+  const rank = report.rank;
   return `
     <section class="result-screen shared-result-screen">
       <div class="result-card">
@@ -1803,7 +1744,7 @@ function renderSharedReport(report: SharedReport): string {
           <div class="share-card-paper">
             <div class="share-card-head">
               <div><span class="mono-label">REPORT CARD</span><strong>${escapeHtml(siteDisplayUrl())}</strong></div>
-              <span>YEAR ${report.year}</span>
+              <span>${rank ? `榜单 #${rank}` : `YEAR ${report.year}`}</span>
             </div>
             <div class="share-card-candidate"><span>考生</span><strong>${escapeHtml(report.playerName)}</strong></div>
             <div class="share-card-score-row">
@@ -1817,6 +1758,7 @@ function renderSharedReport(report: SharedReport): string {
               <span>SEED ${escapeHtml(report.seed)}</span>
               <span>录取线 ${thresholdText}</span>
             </div>
+            ${rank ? `<div class="share-card-rank"><span>榜单排名</span><strong>#${rank}</strong></div>` : ""}
             <div class="share-card-subjects">
               ${report.subjects
                 .map((exam) => `<span>${escapeHtml(exam.label)} <strong>${escapeHtml(exam.score)}</strong></span>`)
@@ -1865,8 +1807,8 @@ function renderFooter(): string {
 async function copyShareLink(): Promise<void> {
   const result = state.result;
   if (!result) return;
-  const link = buildShareUrl(result);
-  const text = buildShareText(result, link);
+  const link = await resolveShareUrl(result);
+  const text = buildShareText(result, link, state.leaderboard.submittedRank);
   try {
     await navigator.clipboard.writeText(text);
     showCopyToast("已复制");
@@ -1876,8 +1818,23 @@ async function copyShareLink(): Promise<void> {
   }
 }
 
-function buildShareText(result: RunResult, link: string): string {
+async function copyLeaderboardShare(): Promise<void> {
+  const text = state.leaderboard.shareText;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showCopyToast("排名文案已复制");
+    trackEvent("leaderboard_share_copy", { rank: state.leaderboard.submittedRank ?? null });
+  } catch {
+    showFooterNotice(text);
+  }
+}
+
+function buildShareText(result: RunResult, link: string, rank?: number): string {
   const playerName = publicPlayerName();
+  if (rank) {
+    return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，当前榜单第${rank}名：${link}`;
+  }
   return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，你也来试试吧：${link}`;
 }
 
@@ -1889,7 +1846,7 @@ async function downloadShareImage(): Promise<void> {
   const result = state.result;
   if (!result) return;
   try {
-    const link = buildShareUrl(result);
+    const link = await resolveShareUrl(result);
     const dataUrl = await createShareImageDataUrl(result, link);
     const anchor = document.createElement("a");
     anchor.href = dataUrl;
@@ -1910,19 +1867,20 @@ async function refreshLeaderboard(silent = false): Promise<void> {
     state.leaderboard = { ...state.leaderboard, status: "loading", error: undefined };
     render();
   }
-  const response = await loadLeaderboard();
-  if (response.ok) {
+  const [standardResponse, endlessResponse] = await Promise.all([loadLeaderboard("standard"), loadLeaderboard("endless")]);
+  if (standardResponse.ok && endlessResponse.ok) {
     state.leaderboard = {
       ...state.leaderboard,
       status: "ready",
-      entries: response.entries,
+      standardEntries: standardResponse.entries,
+      endlessEntries: endlessResponse.entries,
       error: undefined
     };
   } else {
     state.leaderboard = {
       ...state.leaderboard,
       status: "error",
-      error: response.error ?? "榜单暂不可用"
+      error: standardResponse.error ?? endlessResponse.error ?? "榜单暂不可用"
     };
   }
   render();
@@ -1940,21 +1898,40 @@ function toggleLeaderboardDetail(runId: string): void {
 async function submitLeaderboardEntry(): Promise<void> {
   if (!state.result || DEBUG_ROUTE || RESULT_DEBUG_ROUTE) return;
   if (state.leaderboard.status === "submitting") return;
+  const result = state.result;
   state.leaderboard = { ...state.leaderboard, status: "submitting", error: undefined };
   render();
   const response = await verifyRun({
     nickname: publicPlayerName(),
     trace: state.decisionTrace,
-    clientResult: state.result
+    clientResult: result
   });
   if (response.ok && response.entry) {
+    const isEndless = response.entry.year > 1;
+    const rank = response.entry.rank;
     state.leaderboard = {
       status: "ready",
-      entries: mergeLeaderboardEntry(response.entry, state.leaderboard.entries),
+      standardEntries: isEndless
+        ? state.leaderboard.standardEntries
+        : mergeLeaderboardEntry(response.entry, state.leaderboard.standardEntries, "standard"),
+      endlessEntries: isEndless
+        ? mergeLeaderboardEntry(response.entry, state.leaderboard.endlessEntries, "endless")
+        : state.leaderboard.endlessEntries,
       submittedRunId: response.entry.runId,
+      submittedRank: rank,
       selectedRunId: response.entry.runId
     };
-    showFooterNotice("分数已提交榜单。");
+    const link = await resolveShareUrl(result, {
+      source: "leaderboard",
+      runId: response.entry.runId,
+      rank
+    });
+    state.leaderboard = {
+      ...state.leaderboard,
+      shareLink: link,
+      shareText: buildShareText(result, link, rank)
+    };
+    showFooterNotice(rank ? `分数已提交榜单，当前第 ${rank} 名。` : "分数已提交榜单。");
     trackEvent("leaderboard_submit", { score: response.entry.score, year: response.entry.year });
     void refreshLeaderboard(true);
   } else {
@@ -1997,10 +1974,21 @@ async function submitFeedbackMessage(): Promise<void> {
   render();
 }
 
-function mergeLeaderboardEntry(entry: LeaderboardEntry, entries: LeaderboardEntry[]): LeaderboardEntry[] {
+function mergeLeaderboardEntry(
+  entry: LeaderboardEntry,
+  entries: LeaderboardEntry[],
+  board: LeaderboardBoard
+): LeaderboardEntry[] {
   return [entry, ...entries.filter((item) => item.runId !== entry.runId)]
-    .sort((left, right) => right.score - left.score || right.year - left.year || left.createdAt.localeCompare(right.createdAt))
+    .sort((left, right) => compareLeaderboardEntries(left, right, board))
     .slice(0, 10);
+}
+
+function compareLeaderboardEntries(left: LeaderboardEntry, right: LeaderboardEntry, board: LeaderboardBoard): number {
+  if (board === "endless") {
+    return right.year - left.year || right.score - left.score || left.createdAt.localeCompare(right.createdAt);
+  }
+  return right.score - left.score || left.createdAt.localeCompare(right.createdAt);
 }
 
 async function createShareImageDataUrl(result: RunResult, link: string): Promise<string> {
@@ -2167,7 +2155,49 @@ function sanitizeFilename(value: string): string {
   return value.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "report";
 }
 
-function buildShareUrl(result: RunResult): string {
+async function resolveShareUrl(result: RunResult, options: ShareUrlOptions = {}): Promise<string> {
+  if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE) return buildCompactShareUrl(result);
+  const signature = shareUrlSignature(result, options);
+  if (state.shareCache?.signature === signature) {
+    if (state.shareCache.url) return state.shareCache.url;
+    if (state.shareCache.promise) return state.shareCache.promise;
+  }
+  const promise = createBackendShareUrl(result, options).catch(() => buildCompactShareUrl(result));
+  state.shareCache = { signature, promise };
+  const url = await promise;
+  state.shareCache = { signature, url };
+  return url;
+}
+
+async function createBackendShareUrl(result: RunResult, options: ShareUrlOptions): Promise<string> {
+  const response = await createShareReport({
+    source: options.source ?? "result",
+    runId: options.runId,
+    rank: options.rank,
+    report: createSharedReport(result, options.rank)
+  });
+  if (!response.ok || !response.code) {
+    throw new Error(response.error ?? "share_create_failed");
+  }
+  return buildBackendShareUrl(response.code);
+}
+
+function buildBackendShareUrl(code: string): string {
+  const params = new URLSearchParams({ s: code });
+  const url = new URL(window.location.href);
+  const publicUrl = new URL(publicSiteUrl());
+  url.protocol = publicUrl.protocol;
+  url.host = publicUrl.host;
+  if (publicUrl.pathname !== "/") {
+    url.pathname = publicUrl.pathname;
+  }
+  url.pathname = sharePathname(url.pathname);
+  url.search = params.toString();
+  url.hash = "";
+  return url.toString();
+}
+
+function buildCompactShareUrl(result: RunResult): string {
   const params = new URLSearchParams({ r: encodeCompactShareReport(result) });
   const url = new URL(window.location.href);
   const publicUrl = new URL(publicSiteUrl());
@@ -2182,8 +2212,65 @@ function buildShareUrl(result: RunResult): string {
   return url.toString();
 }
 
+function shareUrlSignature(result: RunResult, options: ShareUrlOptions): string {
+  return [
+    options.source ?? "result",
+    options.runId ?? "-",
+    options.rank ?? "-",
+    result.seed,
+    result.year,
+    Math.round(result.totalScore),
+    result.artifactIds.join(",")
+  ].join("|");
+}
+
+function createSharedReport(result: RunResult, rank?: number): SharedReport {
+  return {
+    playerName: publicPlayerName(),
+    seed: result.seed,
+    score: Math.round(result.totalScore),
+    ...(rank ? { rank } : {}),
+    year: result.year,
+    threshold: result.threshold,
+    title: resultTitle(result.totalScore),
+    subjects: result.exams.map((exam) => ({
+      label: SUBJECT_LABELS[exam.subject],
+      score: formatNumber(exam.score),
+      scoreValue: Math.round(exam.score)
+    })),
+    artifacts: [...result.artifactNames]
+  };
+}
+
 function siteDisplayUrl(): string {
   return publicSiteUrl().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+}
+
+async function loadInitialSharedReport(): Promise<void> {
+  const code = state.sharedReportCode;
+  if (!code || state.sharedReport || state.sharedReportStatus !== "loading") return;
+  const response = await loadShareReport(code);
+  if (response.ok && response.report) {
+    state.sharedReport = normalizeSharedReport(response.report);
+    state.sharedReportStatus = state.sharedReport ? "ready" : "error";
+    if (!state.sharedReport) {
+      state.footerNotice = "分享战报数据格式异常。";
+    }
+  } else {
+    state.sharedReportStatus = "error";
+    state.footerNotice = "分享战报不存在或暂时无法读取。";
+  }
+  render();
+}
+
+function readShareCodeFromUrl(): string | undefined {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("s")?.trim();
+    return code && /^[0-9A-Za-z]{6,16}$/.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readSharedReport(): SharedReport | undefined {
@@ -2307,6 +2394,7 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
       playerName: publicNickname(value.p),
       seed: value.s,
       score: Math.round(value.n),
+      rank: normalizedReportRank(value.rank),
       year: Math.max(1, Math.round(value.y)),
       threshold: Math.max(750, Math.round(value.t)),
       title: resultTitle(value.n),
@@ -2339,6 +2427,7 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
     playerName: publicNickname(report.playerName),
     seed: report.seed,
     score: Math.round(report.score),
+    rank: normalizedReportRank(report.rank),
     year: Math.max(1, Math.round(report.year)),
     threshold: Math.max(750, Math.round(report.threshold)),
     title: resultTitle(report.score),
@@ -2350,6 +2439,11 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
       .slice(0, 12),
     artifacts: report.artifacts.filter((item): item is string => typeof item === "string").slice(0, 120)
   };
+}
+
+function normalizedReportRank(value: unknown): number | undefined {
+  const rank = Number(value);
+  return Number.isFinite(rank) && rank >= 1 ? Math.round(rank) : undefined;
 }
 
 function sharedReportScoreAdjustment(report: SharedReport): number {
@@ -2374,6 +2468,7 @@ function isCompactSharedReport(value: unknown): value is {
   n: number;
   y: number;
   t: number;
+  rank?: number;
   e: unknown[];
   a: unknown[];
 } {
@@ -2674,13 +2769,16 @@ function resetRunState(): void {
   state.skipToSettlement = false;
   state.result = undefined;
   state.sharedReport = undefined;
+  state.sharedReportCode = undefined;
+  state.sharedReportStatus = "idle";
+  state.shareCache = undefined;
   state.scoreChoicePrompt = undefined;
   state.restartConfirm = undefined;
   restoreDefaultSpeed();
 }
 
 function resetServiceState(): void {
-  state.leaderboard = { status: "idle", entries: [] };
+  state.leaderboard = { status: "idle", standardEntries: [], endlessEntries: [] };
 }
 
 function openRestartConfirm(): void {

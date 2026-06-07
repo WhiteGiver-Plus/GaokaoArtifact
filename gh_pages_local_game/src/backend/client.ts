@@ -1,8 +1,10 @@
 import type {
   AnalyticsEvent,
+  CreateShareRequest,
   FeedbackRequest,
   FeedbackResponse,
   LeaderboardResponse,
+  ShareReportResponse,
   VerifyRunRequest,
   VerifyRunResponse
 } from "../core/trace.js";
@@ -101,12 +103,28 @@ export async function verifyRun(request: Omit<VerifyRunRequest, "sessionId">): P
   });
 }
 
-export async function loadLeaderboard(): Promise<LeaderboardResponse> {
-  const response = await fetch(`${apiBaseUrl()}/leaderboard?period=all&page=1&pageSize=10`);
+export async function loadLeaderboard(period: "standard" | "endless" = "standard"): Promise<LeaderboardResponse> {
+  const response = await fetch(`${apiBaseUrl()}/leaderboard?period=${period}&page=1&pageSize=10`);
   if (!response.ok) {
     return { ok: false, entries: [], error: `HTTP ${response.status}` };
   }
   return (await response.json()) as LeaderboardResponse;
+}
+
+export async function createShareReport(request: Omit<CreateShareRequest, "sessionId">): Promise<ShareReportResponse> {
+  return fetchJson<ShareReportResponse>("/shares", {
+    sessionId: sessionId(),
+    appVersion: APP_VERSION,
+    ...request
+  });
+}
+
+export async function loadShareReport(code: string): Promise<ShareReportResponse> {
+  const response = await fetch(`${apiBaseUrl()}/shares?code=${encodeURIComponent(code)}`);
+  if (!response.ok) {
+    return { ok: false, error: `HTTP ${response.status}` };
+  }
+  return (await response.json()) as ShareReportResponse;
 }
 
 async function fetchJson<T>(path: string, payload: unknown): Promise<T> {

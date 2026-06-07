@@ -1013,6 +1013,32 @@
   image-rendering: pixelated;
 }
 
+.share-card-rank {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1.5px solid var(--exam-red);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--exam-red);
+  background: rgba(254, 242, 242, 0.86);
+}
+
+.share-card-rank span,
+.share-card-rank strong {
+  font-family: var(--mono);
+  font-weight: 950;
+}
+
+.share-card-rank span {
+  font-size: 12px;
+}
+
+.share-card-rank strong {
+  font-size: 18px;
+}
+
 .share-card-head,
 .share-card-meta,
 .share-card-subjects span,
@@ -1171,6 +1197,73 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.leaderboard-share-box {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(5, 150, 105, 0.55);
+  border-radius: 7px;
+  padding: 9px 10px 9px 38px;
+  background:
+    linear-gradient(90deg, rgba(5, 150, 105, 0.14) 0 28px, transparent 28px),
+    rgba(236, 253, 245, 0.92);
+}
+
+.leaderboard-share-box strong,
+.leaderboard-share-box small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-share-box strong {
+  color: #065f46;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.leaderboard-share-box small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.leaderboard-boards {
+  display: grid;
+  gap: 12px;
+}
+
+.leaderboard-board {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.leaderboard-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 2px 0 28px;
+}
+
+.leaderboard-board-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .leaderboard-list {
@@ -1710,6 +1803,19 @@
     min-height: 38px;
   }
 
+  .leaderboard-share-box {
+    grid-template-columns: 1fr;
+    padding-left: 10px;
+  }
+
+  .leaderboard-share-box .secondary-button {
+    width: 100%;
+  }
+
+  .leaderboard-board-head {
+    padding-left: 0;
+  }
+
   .leaderboard-row {
     grid-template-columns: 28px minmax(0, 1fr) auto;
   }
@@ -1754,6 +1860,10 @@
   .share-card-qr {
     width: clamp(54px, 18vw, 82px);
     height: clamp(54px, 18vw, 82px);
+  }
+
+  .trigger-overlay {
+    padding: 70px 12px 16px;
   }
 }
 
@@ -2486,11 +2596,12 @@
 }
 
 .trigger-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 42;
+  z-index: 58;
   display: grid;
   place-items: center;
+  padding: 86px 18px 24px;
   pointer-events: none;
   overflow: visible;
 }
@@ -4070,6 +4181,12 @@
   display: block;
 }
 
+.restart-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .geo-pause:before,
 .geo-pause:after {
   content: "";
@@ -4098,34 +4215,6 @@
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
   border-left: 11px solid currentColor;
-}
-
-.geo-restart {
-  width: 24px;
-  height: 24px;
-}
-
-.geo-restart:before {
-  content: "";
-  position: absolute;
-  inset: 3px;
-  border: 2.5px solid currentColor;
-  border-left-color: transparent;
-  border-radius: 50%;
-  transform: rotate(-40deg);
-}
-
-.geo-restart:after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 8px;
-  height: 8px;
-  border-top: 2.5px solid currentColor;
-  border-left: 2.5px solid currentColor;
-  transform: rotate(-30deg);
-  transform-origin: center;
 }
 
 .geo-skip:before,
@@ -4360,17 +4449,25 @@
 }
 
 @media (min-width: 900px) {
+  .paper-field {
+    width: min(1360px, 100%);
+  }
+
   .compact-exam-grid {
     align-items: start;
+    grid-template-columns: minmax(620px, 1.55fr) minmax(300px, 0.85fr);
+    gap: 16px;
   }
 
   .compact-exam-grid .exam-stage {
     grid-column: 1;
     grid-row: 1;
+    min-width: 0;
   }
 
   .compact-exam-grid .support-drawers {
     grid-row: 1;
+    min-width: 0;
     align-self: start;
     align-content: start;
     height: var(--left-column-height, auto);
@@ -4385,6 +4482,20 @@
 
   .footer-notice {
     grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 900px) and (max-width: 1120px) {
+  .compact-exam-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compact-exam-grid .support-drawers {
+    grid-column: 1;
+    grid-row: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 }
 
