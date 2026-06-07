@@ -90,7 +90,7 @@ interface SharedReport {
   year: number;
   threshold: number;
   title: string;
-  subjects: Array<{ label: string; score: string }>;
+  subjects: Array<{ label: string; score: string; scoreValue?: number }>;
   artifacts: string[];
 }
 
@@ -139,6 +139,7 @@ interface UiState {
   debugSearchInput: string;
   debugSearch: string;
   footerNotice?: string;
+  copyToast?: string;
 }
 
 const RESULT_DEBUG_RUN = RESULT_DEBUG_ROUTE ? createResultDebugRun() : undefined;
@@ -329,6 +330,7 @@ function render(): void {
     <div class="app-shell fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""} ${pausedClass}">
       <main class="paper-field">${renderPhase()}</main>
       ${renderScoreChoicePrompt()}
+      ${renderCopyToast()}
       ${renderFooter()}
     </div>
   `;
@@ -367,6 +369,15 @@ function renderPhase(): string {
   if (state.phase === "exam" && state.activeExam) return renderExam();
   if (state.phase === "result" && state.result) return renderResult(state.result);
   return renderLoading();
+}
+
+function renderCopyToast(): string {
+  if (!state.copyToast) return "";
+  return `
+    <div class="copy-toast" role="status" aria-live="polite">
+      <strong>${escapeHtml(state.copyToast)}</strong>
+    </div>
+  `;
 }
 
 async function hydrateShareQRCodes(): Promise<void> {
@@ -1227,9 +1238,7 @@ function renderResult(result: RunResult): string {
         ${renderShareCard(result, title)}
         ${renderResultArtifacts(result)}
         <div class="result-subjects">
-          ${result.exams
-            .map((exam) => `<div><span>${SUBJECT_LABELS[exam.subject]}</span><strong>${formatNumber(exam.score)}</strong></div>`)
-            .join("")}
+          ${renderResultSubjectRows(result)}
         </div>
         <div class="result-actions">
           ${passedThreshold && !RESULT_DEBUG_ROUTE ? `<button class="primary-button" type="button" data-action="continue-endless">进入第 ${result.year + 1} 年</button>` : ""}
@@ -1271,9 +1280,7 @@ function renderShareCard(result: RunResult, title: string): string {
         </div>
         <div class="share-card-hand"><span>无尽年</span><strong>${result.year}</strong></div>
         <div class="share-card-subjects">
-          ${result.exams
-            .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`)
-            .join("")}
+          ${renderShareCardSubjectRows(result)}
         </div>
         <div class="share-card-terms">
           ${result.artifactNames
@@ -1304,6 +1311,46 @@ function renderArtifactChip(name: string, artifactId?: string): string {
   const artifact = artifactId ? findArtifact(artifactId) : undefined;
   const className = artifact ? ` class="rarity-text-${rarityClass(artifact.rarity)}"` : "";
   return `<span${className}>${escapeHtml(name)}</span>`;
+}
+
+function renderResultSubjectRows(result: RunResult): string {
+  return [
+    ...result.exams.map(
+      (exam) => `<div><span>${SUBJECT_LABELS[exam.subject]}</span><strong>${formatNumber(exam.score)}</strong></div>`
+    ),
+    renderScoreAdjustmentRow(resultScoreAdjustment(result), "result")
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function renderShareCardSubjectRows(result: RunResult): string {
+  return [
+    ...result.exams.map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`),
+    renderScoreAdjustmentRow(resultScoreAdjustment(result), "share")
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function renderScoreAdjustmentRow(adjustment: number, variant: "result" | "share"): string {
+  if (Math.abs(adjustment) < 0.0001) return "";
+  const label = scoreAdjustmentLabel(adjustment);
+  const value = formatDelta(adjustment);
+  const className = `score-adjustment score-adjustment-${adjustment >= 0 ? "positive" : "negative"}`;
+  if (variant === "result") {
+    return `<div class="${className}"><span>${label}</span><strong>${value}</strong></div>`;
+  }
+  return `<span class="${className}">${label} <strong>${value}</strong></span>`;
+}
+
+function scoreAdjustmentLabel(adjustment: number): string {
+  return adjustment >= 0 ? "遗物总分加成" : "遗物总分修正";
+}
+
+function resultScoreAdjustment(result: RunResult): number {
+  const subjectTotal = result.exams.reduce((sum, exam) => sum + exam.score, 0);
+  return result.totalScore - subjectTotal;
 }
 
 function renderSharedReport(report: SharedReport): string {
@@ -1338,6 +1385,7 @@ function renderSharedReport(report: SharedReport): string {
               ${report.subjects
                 .map((exam) => `<span>${escapeHtml(exam.label)} <strong>${escapeHtml(exam.score)}</strong></span>`)
                 .join("")}
+              ${renderScoreAdjustmentRow(sharedReportScoreAdjustment(report), "share")}
             </div>
             <div class="share-card-terms">
               ${report.artifacts.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}
@@ -1384,14 +1432,15 @@ async function copyShareLink(): Promise<void> {
   const text = buildShareText(result, link);
   try {
     await navigator.clipboard.writeText(text);
-    showFooterNotice("战报分享文案已复制。");
+    showCopyToast("已复制");
   } catch {
     showFooterNotice(text);
   }
 }
 
 function buildShareText(result: RunResult, link: string): string {
-  return `我在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分。${link}`;
+  const playerName = state.playerName || "考生";
+  return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，你也来试试吧：${link}`;
 }
 
 async function downloadShareImage(): Promise<void> {
@@ -1491,13 +1540,17 @@ function drawReportCanvas(
   context.fillText("科目分数", 112, y);
   y += 28;
   const subjectWidth = 280;
-  result.exams.forEach((exam, index) => {
+  const scoreRows = [
+    ...result.exams.map((exam) => `${SUBJECT_LABELS[exam.subject]}  ${formatNumber(exam.score)}`),
+    resultScoreAdjustment(result) ? `${scoreAdjustmentLabel(resultScoreAdjustment(result))}  ${formatDelta(resultScoreAdjustment(result))}` : ""
+  ].filter(Boolean);
+  scoreRows.forEach((text, index) => {
     const x = 112 + (index % 3) * (subjectWidth + 26);
     const rowY = y + Math.floor(index / 3) * 76;
-    drawPill(context, x, rowY, subjectWidth, 52, `${SUBJECT_LABELS[exam.subject]}  ${formatNumber(exam.score)}`);
+    drawPill(context, x, rowY, subjectWidth, 52, text);
   });
 
-  y += Math.ceil(result.exams.length / 3) * 76 + 44;
+  y += Math.ceil(scoreRows.length / 3) * 76 + 44;
   context.font = "900 24px 'Microsoft YaHei', sans-serif";
   context.fillStyle = "#111827";
   context.fillText(`遗物清单 ${result.artifactNames.length} 件`, 112, y);
@@ -1631,7 +1684,7 @@ function decodeCompactShareReport(value: string): SharedReport | undefined {
   };
 }
 
-function decodeShareSubjects(value: string): Array<{ label: string; score: string }> {
+function decodeShareSubjects(value: string): Array<{ label: string; score: string; scoreValue?: number }> {
   if (!value || value === "-") return [];
   return value
     .split("_")
@@ -1640,9 +1693,9 @@ function decodeShareSubjects(value: string): Array<{ label: string; score: strin
       const subject = subjectByShareIndex(Number.parseInt(subjectIndexText, 36));
       const score = decodeShareNumber(scoreText);
       if (!subject || !Number.isFinite(score)) return undefined;
-      return { label: SUBJECT_LABELS[subject], score: formatNumber(score) };
+      return { label: SUBJECT_LABELS[subject], score: formatNumber(score), scoreValue: score };
     })
-    .filter((item): item is { label: string; score: string } => Boolean(item));
+    .filter((item): item is { label: string; score: string; scoreValue: number } => Boolean(item));
 }
 
 function decodeShareArtifacts(value: string): string[] {
@@ -1709,7 +1762,7 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
         .filter((item): item is [SubjectId, string] =>
           Array.isArray(item) && typeof item[0] === "string" && item[0] in SUBJECT_LABELS && typeof item[1] === "string"
         )
-        .map(([subject, score]) => ({ label: SUBJECT_LABELS[subject], score }))
+        .map(([subject, score]) => ({ label: SUBJECT_LABELS[subject], score, scoreValue: parseDisplayNumber(score) }))
         .slice(0, 12),
       artifacts: value.a
         .filter((id): id is string => typeof id === "string")
@@ -1741,9 +1794,25 @@ function normalizeSharedReport(value: unknown): SharedReport | undefined {
       .filter((item): item is { label: string; score: string } =>
         Boolean(item && typeof item === "object" && typeof item.label === "string" && typeof item.score === "string")
       )
+      .map((item) => ({ ...item, scoreValue: parseDisplayNumber(item.score) }))
       .slice(0, 12),
     artifacts: report.artifacts.filter((item): item is string => typeof item === "string").slice(0, 120)
   };
+}
+
+function sharedReportScoreAdjustment(report: SharedReport): number {
+  let subjectTotal = 0;
+  for (const subject of report.subjects) {
+    const score = subject.scoreValue ?? parseDisplayNumber(subject.score);
+    if (typeof score !== "number" || !Number.isFinite(score)) return 0;
+    subjectTotal += score;
+  }
+  return report.score - subjectTotal;
+}
+
+function parseDisplayNumber(value: string): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isCompactSharedReport(value: unknown): value is {
@@ -1787,6 +1856,17 @@ function showFooterNotice(message: string): void {
       render();
     }
   }, 3200);
+}
+
+function showCopyToast(message: string): void {
+  state.copyToast = message;
+  render();
+  window.setTimeout(() => {
+    if (state.copyToast === message) {
+      state.copyToast = undefined;
+      render();
+    }
+  }, 1800);
 }
 
 function toggleSubject(subject: SubjectId): void {
