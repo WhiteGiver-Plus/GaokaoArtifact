@@ -850,6 +850,21 @@ function renderPaperStatusTile(label: string, value: string, key: keyof LiveExam
   `;
 }
 
+function renderScoreBankFloat(event: VisualEvent): string {
+  if (!event.scoreBanking || !event.settling || typeof event.scoreDelta !== "number") return "";
+  const detail = event.detailText ? escapeHtml(event.detailText) : `分数 ${formatDelta(event.scoreDelta)}`;
+  const ledger = event.examScoreBefore !== undefined && event.examScoreAfter !== undefined
+    ? `<em>${formatNumber(event.examScoreBefore)} -> ${formatNumber(event.examScoreAfter)}</em>`
+    : "";
+  return `
+    <b class="score-bank-float bank-${event.intensity}" aria-hidden="true">
+      <strong>入账 ${formatDelta(event.scoreDelta)}</strong>
+      <small>${detail}</small>
+      ${ledger}
+    </b>
+  `;
+}
+
 function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: number): string {
   const rule = SUBJECT_EXAM_RULES[exam.subject];
   const done = Math.min(rule.questionCount, exam.questionIndex);
@@ -859,6 +874,7 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
   const progress = Math.min(100, (done / rule.questionCount) * 100);
   const trigger = state.activeTrigger;
   const flash = trigger ?? state.scoreFlash;
+  const bankFlash = state.scoreFlash?.scoreBanking && state.scoreFlash.settling ? state.scoreFlash : undefined;
   const scoreFlashClass = flash
     ? flash.settling
       ? `score-settling settle-${flash.intensity} ${flash.scoreBanking ? "score-banking" : ""}`
@@ -883,6 +899,7 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
           <span>分数</span>
           <strong class="${exam.score > rule.fullScore ? "over-score" : ""}">${examScoreText}</strong>
           <small>${SUBJECT_LABELS[exam.subject]}当前分</small>
+          ${bankFlash ? renderScoreBankFloat(bankFlash) : ""}
         </div>
         <div class="paper-status-grid">
           ${renderPaperStatusTile("正确率", `${formatNumber(state.liveStatus.accuracy)}%`, "accuracy")}
@@ -969,6 +986,9 @@ function renderAnswerDot(index: number, pointsPerQuestion: number): string {
 function renderTriggerOverlay(): string {
   const event = state.activeTrigger ?? state.scoreFlash;
   if (!event) {
+    return `<div class="trigger-overlay" aria-hidden="true"></div>`;
+  }
+  if (event.scoreBanking && event.settling) {
     return `<div class="trigger-overlay" aria-hidden="true"></div>`;
   }
   const delta = [...(event.deltas ?? [])].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
