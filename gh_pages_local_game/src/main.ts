@@ -2287,6 +2287,12 @@ function createRunHooks(runId: number): ChoiceHooks {
       };
       state.scoreAdjustment = exam.currentTotalAdjustment;
       if (state.skipToSettlement) return;
+      if (!hasBankingScore && !question.correct) {
+        state.scoreFlash = undefined;
+        render();
+        await playbackDelay(runId, scoreCollectDelayMs());
+        return;
+      }
       const visualEvent: VisualEvent = {
         id: `score-${Date.now()}-${question.questionIndex}`,
         label: hasBankingScore ? formatDelta(scoreGained) : question.correct ? "判定成功" : "失误",
