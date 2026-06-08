@@ -79,6 +79,7 @@ export interface LeaderboardEntry {
   runId: string;
   nickname: string;
   score: number;
+  rank?: number;
   year: number;
   threshold: number;
   seed: string;
@@ -91,6 +92,7 @@ export interface LeaderboardEntry {
 export interface LeaderboardSharePayload {
   seed: string;
   totalScore: number;
+  rank?: number;
   year: number;
   threshold: number;
   appVersion?: AppVersionInfo;
@@ -110,6 +112,40 @@ export interface VerifyRunResponse {
 export interface LeaderboardResponse {
   ok: boolean;
   entries: LeaderboardEntry[];
+  error?: string;
+}
+
+export interface ShareReportSubject {
+  label: string;
+  score: string;
+  scoreValue?: number;
+}
+
+export interface ShareReportPayload {
+  playerName: string;
+  seed: string;
+  score: number;
+  rank?: number;
+  year: number;
+  threshold: number;
+  title: string;
+  subjects: ShareReportSubject[];
+  artifacts: string[];
+}
+
+export interface CreateShareRequest {
+  sessionId: string;
+  appVersion?: AppVersionInfo;
+  source?: "result" | "leaderboard";
+  runId?: string;
+  rank?: number;
+  report: ShareReportPayload;
+}
+
+export interface ShareReportResponse {
+  ok: boolean;
+  code?: string;
+  report?: ShareReportPayload;
   error?: string;
 }
 
