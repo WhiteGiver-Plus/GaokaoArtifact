@@ -54,6 +54,7 @@ type Phase = "start" | "loading" | "draft" | "exam" | "result";
 type EventTone = "score" | "term" | "chain" | "fail" | "idle";
 type EffectIntensity = "low" | "medium" | "high" | "jackpot";
 type SpeedMultiplier = 1 | 2 | 4 | 8;
+type DrawerKey = "state" | "terms" | "help" | "log" | "footerHelp";
 type VisualEventKind =
   | "score:add"
   | "score:bank"
@@ -199,6 +200,7 @@ interface UiState {
   debugSearch: string;
   footerNotice?: string;
   copyToast?: string;
+  drawerOpen: Record<DrawerKey, boolean>;
   decisionTrace: DecisionTrace;
   leaderboard: LeaderboardState;
   feedback: FeedbackState;
@@ -244,12 +246,30 @@ const state: UiState = {
   debugArtifactIds: DEBUG_ROUTE ? readDebugArtifactIds() : [],
   debugSearchInput: "",
   debugSearch: "",
+  drawerOpen: {
+    state: false,
+    terms: false,
+    help: false,
+    log: false,
+    footerHelp: false
+  },
   decisionTrace: createDecisionTrace(),
   leaderboard: { status: "idle", standardEntries: [], endlessEntries: [] },
   feedback: { open: false, message: "", contact: "", status: "idle" }
 };
 
 let playbackDelayResolvers: Array<() => void> = [];
+let suppressNextToolClickUntil = 0;
+
+root.addEventListener("pointerdown", (event) => {
+  const target = event.target as HTMLElement;
+  const action = target.closest<HTMLElement>(".exam-tool-dock [data-action]")?.dataset.action;
+  if (!action || !isExamToolAction(action)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  suppressNextToolClickUntil = Date.now() + 450;
+  handleExamToolAction(action);
+});
 
 root.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
@@ -262,6 +282,10 @@ root.addEventListener("click", (event) => {
     | SubjectId
     | undefined;
 
+  if (action && isExamToolAction(action)) {
+    if (Date.now() < suppressNextToolClickUntil) return;
+    if (handleExamToolAction(action)) return;
+  }
   if (choice !== undefined) {
     state.choicePrompt?.resolve(Number(choice));
     return;
@@ -371,15 +395,34 @@ root.addEventListener("click", (event) => {
     resetResultDebug();
     return;
   }
+  if (action === "continue-settlement") {
+    state.settlementContinue?.();
+    return;
+  }
+});
+
+function isExamToolAction(action: string): boolean {
+  return action === "toggle-auto" || action === "restart" || action === "cycle-speed" || action === "skip-to-settlement";
+}
+
+function handleExamToolAction(action: string): boolean {
+  if (action === "restart") {
+    if (state.phase === "exam" && state.activeExam) {
+      openRestartConfirm();
+    } else {
+      resetToStart(true);
+    }
+    return true;
+  }
   if (action === "toggle-auto") {
     state.autoPlay = !state.autoPlay;
     wakePlaybackDelays();
     render();
-    return;
+    return true;
   }
   if (action === "cycle-speed") {
     cycleSpeedMultiplier();
-    return;
+    return true;
   }
   if (action === "skip-to-settlement") {
     if (state.phase === "exam" && state.activeExam && !state.examSettlement) {
@@ -389,13 +432,10 @@ root.addEventListener("click", (event) => {
       wakePlaybackDelays();
       render();
     }
-    return;
+    return true;
   }
-  if (action === "continue-settlement") {
-    state.settlementContinue?.();
-    return;
-  }
-});
+  return false;
+}
 
 root.addEventListener("input", (event) => {
   const input = event.target as HTMLInputElement | HTMLTextAreaElement;
@@ -428,6 +468,18 @@ root.addEventListener("input", (event) => {
     return;
   }
 });
+
+root.addEventListener(
+  "toggle",
+  (event) => {
+    const details = event.target;
+    if (!(details instanceof HTMLDetailsElement)) return;
+    const drawer = details.dataset.drawer as DrawerKey | undefined;
+    if (!drawer) return;
+    state.drawerOpen = { ...state.drawerOpen, [drawer]: details.open };
+  },
+  true
+);
 
 function syncFeedbackStateFromDom(): void {
   const messageInput = root.querySelector<HTMLTextAreaElement>('[data-field="feedback-message"]');
@@ -486,8 +538,9 @@ function render(): void {
   const activeKind = state.activeTrigger?.kind ?? state.scoreFlash?.kind ?? "chain:step";
   const pausedClass = state.phase === "exam" && !state.autoPlay ? "playback-paused" : "";
   root.innerHTML = `
-    <div class="app-shell fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""} ${pausedClass}">
+    <div class="app-shell phase-${state.phase} fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""} ${pausedClass}">
       <main class="paper-field">${renderPhase()}</main>
+      ${state.phase === "exam" && state.activeExam ? renderExamToolDock() : ""}
       ${renderScoreChoicePrompt()}
       ${renderRestartConfirm()}
       ${renderCopyToast()}
@@ -1102,7 +1155,6 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
         <span>准考证号 ${escapeHtml(state.seed.slice(0, 10).toUpperCase())}</span>
         <i></i>
       </div>
-      ${renderExamToolDock()}
       <div class="paper-status-layout" aria-label="当前考试状态">
         <div class="paper-title-block compact-paper-title">
           <p class="mono-label">AUTO EXAM STATUS</p>
@@ -1309,7 +1361,7 @@ function renderMiniTerm(term: ArtifactConfig, active: boolean): string {
 
 function renderStateDrawer(exam: NonNullable<UiState["activeExam"]>, pending: number): string {
   return `
-    <details class="mobile-drawer state-drawer">
+    <details class="mobile-drawer state-drawer" data-drawer="state" ${drawerOpenAttr("state")}>
       <summary><span>考试状态</span><strong>${pending} 题待判</strong></summary>
       <div class="subject-list">
         ${subjectOrder()
@@ -1337,7 +1389,7 @@ function renderStateDrawer(exam: NonNullable<UiState["activeExam"]>, pending: nu
 
 function renderTermsDrawer(): string {
   return `
-    <details class="mobile-drawer terms-drawer">
+    <details class="mobile-drawer terms-drawer" data-drawer="terms" ${drawerOpenAttr("terms")}>
       <summary><span>遗物列表</span><strong>${state.artifacts.length} 条</strong></summary>
       <div class="panel-title">
         <p class="mono-label">ADMISSION TICKET</p>
@@ -1367,7 +1419,7 @@ function renderTermCard(artifact: ArtifactConfig): string {
 
 function renderHelpDrawer(): string {
   return `
-    <details class="mobile-drawer help-drawer">
+    <details class="mobile-drawer help-drawer" data-drawer="help" ${drawerOpenAttr("help")}>
       <summary><span>帮助文档</span><strong>规则 / 体力 / 操作</strong></summary>
       ${renderHelpDoc()}
     </details>
@@ -1407,7 +1459,7 @@ function renderHelpDoc(): string {
 
 function renderLogDrawer(): string {
   return `
-    <details class="mobile-drawer log-drawer">
+    <details class="mobile-drawer log-drawer" data-drawer="log" ${drawerOpenAttr("log")}>
       <summary><span>连锁日志</span><strong>${state.logs.length} 条</strong></summary>
       ${renderLogStandalone()}
     </details>
@@ -1792,7 +1844,7 @@ function renderFooter(): string {
     : "";
   return `
     <footer class="info-footer">
-      <details>
+      <details data-drawer="footerHelp" ${drawerOpenAttr("footerHelp")}>
         <summary><span>帮助文档</span><strong>规则 / 体力 / 操作</strong></summary>
         <div class="footer-help">
           ${renderHelpDoc()}
@@ -1802,6 +1854,10 @@ function renderFooter(): string {
       ${notice}
     </footer>
   `;
+}
+
+function drawerOpenAttr(key: DrawerKey): string {
+  return state.drawerOpen[key] ? "open" : "";
 }
 
 async function copyShareLink(): Promise<void> {
