@@ -999,7 +999,7 @@ export const LOCAL_ARTIFACTS = [
       "分数形态",
       "考试倍率"
     ],
-    "description": "每科考试结束时，若结算前考试原始分包含至少 2 个相同数字，则本场考试倍率 +2。",
+    "description": "每科考试结束时，若结算前考试原始分为回文数，则本场考试倍率 +10。",
     "modifiers": [],
     "triggers": [
       {
@@ -1343,7 +1343,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "math_lover",
-    "name": "2",
+    "name": "数学爱好者",
     "rarity": "rare",
     "tags": [
       "分数形态",

@@ -834,6 +834,57 @@
   margin: 18px 0;
 }
 
+.result-title-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.result-title-row h1 {
+  margin: 0;
+}
+
+.result-share-actions {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.15fr) repeat(2, minmax(120px, 0.8fr));
+  gap: 10px;
+  width: min(100%, 560px);
+  margin: 0 0 8px;
+  border: 2px solid #111827;
+  border-radius: 8px;
+  padding: 10px;
+  background:
+    linear-gradient(90deg, rgba(217, 52, 43, 0.12) 0 28px, transparent 28px),
+    repeating-linear-gradient(0deg, transparent 0 25px, rgba(36, 89, 179, 0.07) 26px),
+    #fff;
+  box-shadow: 5px 5px rgba(17, 24, 39, 0.12);
+}
+
+.result-share-actions .primary-button,
+.result-share-actions .secondary-button {
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.result-share-primary {
+  font-size: 15px !important;
+  box-shadow: 0 8px rgba(217, 52, 43, 0.2);
+}
+
+.result-lower-summary {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 0;
+}
+
+.result-lower-summary > p {
+  margin: 0;
+}
+
 .endless-panel,
 .result-actions {
   display: grid;
@@ -971,9 +1022,9 @@
 .share-card-score-row {
   width: 100%;
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 14px;
 }
 
@@ -988,12 +1039,11 @@
 }
 
 .share-card-score-row .share-card-score {
-  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 
 .share-card-qr-box {
-  flex: 0 0 auto;
   min-width: 0;
   display: grid;
   place-items: center;
@@ -1782,6 +1832,29 @@
     grid-template-columns: 1fr;
   }
 
+  .result-title-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .result-share-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 328px;
+    max-width: 100%;
+    margin: 0 0 10px;
+    padding: 8px;
+  }
+
+  .result-share-actions .primary-button,
+  .result-share-actions .secondary-button {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 6px;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+
   .result-actions .primary-button,
   .result-actions .secondary-button {
     width: 100%;
@@ -1887,14 +1960,14 @@
   }
 
   .share-card-score-row .share-card-score {
-    font-size: clamp(48px, 17vw, 76px);
+    font-size: clamp(42px, 15vw, 64px);
   }
 
   .share-card-qr {
-    width: clamp(48px, 17vw, 76px);
-    height: clamp(48px, 17vw, 76px);
-    max-width: 22vw;
-    max-height: 22vw;
+    width: clamp(48px, 16vw, 62px);
+    height: clamp(48px, 16vw, 62px);
+    max-width: 62px;
+    max-height: 62px;
   }
 
   .share-card-head {
