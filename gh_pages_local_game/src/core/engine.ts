@@ -25,7 +25,7 @@ import { collectEventEntries, sortEventEntries } from "./eventBus.js";
 import { calcLayerForEffects, phaseForTiming } from "./phases.js";
 import { queryModifierValue } from "./modifierSystem.js";
 
-const EVENT_TRIGGER_LIMIT = 20;
+const EVENT_TRIGGER_LIMIT = 50;
 const NON_REPLAYABLE_SCORE_EFFECTS = new Set<EffectConfig["op"]>([
   "maximizeOnesDigit",
   "maximizeDigitSwap"
@@ -440,7 +440,7 @@ async function executeTrigger(
   options: GameOptions
 ): Promise<boolean> {
   if (state.currentEventCount >= EVENT_TRIGGER_LIMIT) {
-    appendLog(state, "本次结算触发次数达到 20，后续遗物触发被跳过。");
+    appendLog(state, "本次结算触发次数达到 50，后续遗物触发被跳过。");
     return false;
   }
   if (!evaluateCondition(context.trigger.condition, state, {
