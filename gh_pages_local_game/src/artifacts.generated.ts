@@ -573,7 +573,7 @@ export const LOCAL_ARTIFACTS = [
       "随机爆发",
       "分数补偿"
     ],
-    "description": "每题结算后有 0.2% 概率触发，本场考试最终得分增加 1000；每次触发后，下次幸运方块增加值 x2。",
+    "description": "每题结算后有 0.3% 概率触发，本场考试最终得分增加 1000；每次触发后，下次幸运方块增加值 x2。",
     "modifiers": [],
     "triggers": [
       {
@@ -595,7 +595,7 @@ export const LOCAL_ARTIFACTS = [
     "tags": [
       "高正确率"
     ],
-    "description": "基础正确率 x125%。",
+    "description": "基础正确率 x135%。",
     "modifiers": [
       {
         "target": "baseAccuracy",
@@ -615,7 +615,7 @@ export const LOCAL_ARTIFACTS = [
       "体力",
       "容错"
     ],
-    "description": "你的体力下限被锁定为不可低于 10%。",
+    "description": "你的体力下限被锁定为不可低于 30%。",
     "modifiers": [
       {
         "target": "staminaFloor",
@@ -675,7 +675,7 @@ export const LOCAL_ARTIFACTS = [
     "tags": [
       "高正确率"
     ],
-    "description": "基础正确率 x120%。",
+    "description": "基础正确率 x150%。",
     "modifiers": [
       {
         "target": "baseAccuracy",
@@ -1624,7 +1624,7 @@ export const LOCAL_ARTIFACTS = [
         "effects": [
           {
             "op": "addExamPostBonus",
-            "value": 20
+            "value": 200
           }
         ]
       },
@@ -1639,7 +1639,7 @@ export const LOCAL_ARTIFACTS = [
         "effects": [
           {
             "op": "addExamPostBonus",
-            "value": 100
+            "value": 2000
           }
         ]
       },
@@ -1654,7 +1654,7 @@ export const LOCAL_ARTIFACTS = [
         "effects": [
           {
             "op": "addExamPostBonus",
-            "value": 1000
+            "value": 50000
           }
         ]
       },
@@ -1669,7 +1669,7 @@ export const LOCAL_ARTIFACTS = [
         "effects": [
           {
             "op": "addExamPostBonus",
-            "value": 5000
+            "value": 500000
           }
         ]
       }
@@ -1753,7 +1753,7 @@ export const LOCAL_ARTIFACTS = [
       "联动",
       "分数补偿"
     ],
-    "description": "每题结算时，考试最终分数增加 2 的本题此前触发遗物次数次方分，上限 128；此前没有触发则不加分。",
+    "description": "每题结算时，考试最终分数增加 2 的本题此前触发遗物次数次方分，上限 128。",
     "modifiers": [],
     "triggers": [
       {
