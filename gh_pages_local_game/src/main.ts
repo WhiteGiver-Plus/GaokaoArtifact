@@ -32,6 +32,7 @@ import {
   createDecisionTraceRun,
   type DecisionTrace,
   type LeaderboardEntry,
+  type LeaderboardPeriod,
   type ScoreDecisionEntry,
   type ShareReportPayload
 } from "./core/trace.js";
@@ -92,12 +93,16 @@ interface RestartConfirm {
 }
 
 type ServiceStatus = "idle" | "loading" | "submitting" | "ready" | "sent" | "error";
-type LeaderboardBoard = "standard" | "endless";
+type LeaderboardBoard = LeaderboardPeriod;
 
 interface LeaderboardState {
   status: ServiceStatus;
   standardEntries: LeaderboardEntry[];
   endlessEntries: LeaderboardEntry[];
+  negativeEntries: LeaderboardEntry[];
+  standardHourlyEntries: LeaderboardEntry[];
+  endlessHourlyEntries: LeaderboardEntry[];
+  openBoards: Record<LeaderboardBoard, boolean>;
   submittedRunId?: string;
   submittedRank?: number;
   selectedRunId?: string;
@@ -209,6 +214,14 @@ interface UiState {
 const RESULT_DEBUG_RUN = RESULT_DEBUG_ROUTE ? createResultDebugRun() : undefined;
 const RESULT_DEBUG_ARTIFACTS = RESULT_DEBUG_RUN ? artifactsForResult(RESULT_DEBUG_RUN) : [];
 const INITIAL_SHARED_REPORT_CODE = RESULT_DEBUG_ROUTE ? undefined : readShareCodeFromUrl();
+const LEADERBOARD_BOARDS: Array<{ id: LeaderboardBoard; title: string; period: LeaderboardPeriod; description: string }> = [
+  { id: "standard-hourly", title: "本小时第一年榜", period: "standard-hourly", description: "当前小时刷新" },
+  { id: "endless-hourly", title: "本小时无尽榜", period: "endless-hourly", description: "当前小时刷新" },
+  { id: "standard", title: "第一年榜", period: "standard", description: "历史总榜" },
+  { id: "endless", title: "无尽榜", period: "endless", description: "历史总榜" },
+  { id: "negative", title: "负分榜", period: "negative", description: "历史总榜" }
+];
+const INITIAL_LEADERBOARD_OPEN_BOARDS = initialLeaderboardOpenBoards();
 
 const state: UiState = {
   runId: 0,
@@ -254,12 +267,21 @@ const state: UiState = {
     footerHelp: false
   },
   decisionTrace: createDecisionTrace(),
-  leaderboard: { status: "idle", standardEntries: [], endlessEntries: [] },
+  leaderboard: {
+    status: "idle",
+    standardEntries: [],
+    endlessEntries: [],
+    negativeEntries: [],
+    standardHourlyEntries: [],
+    endlessHourlyEntries: [],
+    openBoards: INITIAL_LEADERBOARD_OPEN_BOARDS
+  },
   feedback: { open: false, message: "", contact: "", status: "idle" }
 };
 
 let playbackDelayResolvers: Array<() => void> = [];
 let suppressNextToolClickUntil = 0;
+let leaderboardHourlyRefreshTimer: number | undefined;
 
 root.addEventListener("pointerdown", (event) => {
   const target = event.target as HTMLElement;
@@ -278,6 +300,9 @@ root.addEventListener("click", (event) => {
   const scorePosition = target.closest<HTMLElement>("[data-score-position]")?.dataset.scorePosition;
   const action = target.closest<HTMLElement>("[data-action]")?.dataset.action;
   const leaderboardRun = target.closest<HTMLElement>("[data-leaderboard-run]")?.dataset.leaderboardRun;
+  const leaderboardBoard = target.closest<HTMLElement>("[data-leaderboard-board]")?.dataset.leaderboardBoard as
+    | LeaderboardBoard
+    | undefined;
   const subject = target.closest<HTMLElement>("[data-subject]")?.dataset.subject as
     | SubjectId
     | undefined;
@@ -336,6 +361,14 @@ root.addEventListener("click", (event) => {
   }
   if (action === "copy-leaderboard-share") {
     void copyLeaderboardShare();
+    return;
+  }
+  if (action === "copy-leaderboard-board" && leaderboardBoard) {
+    void copyLeaderboardBoardLink(leaderboardBoard);
+    return;
+  }
+  if (action === "toggle-leaderboard-board" && leaderboardBoard) {
+    toggleLeaderboardBoard(leaderboardBoard);
     return;
   }
   if (action === "download-share-image") {
@@ -535,6 +568,7 @@ window.addEventListener("resize", syncColumnHeights);
 
 render();
 void loadInitialSharedReport();
+scheduleLeaderboardHourlyRefresh();
 trackEvent("page_view", pageViewAnalyticsProperties());
 
 function render(): void {
@@ -1672,24 +1706,31 @@ function renderLeaderboardRows(): string {
   }
   return `
     <div class="leaderboard-boards">
-      ${renderLeaderboardBoard("standard", "第一年榜", state.leaderboard.standardEntries)}
-      ${renderLeaderboardBoard("endless", "无尽榜", state.leaderboard.endlessEntries)}
+      ${LEADERBOARD_BOARDS.map((board) => renderLeaderboardBoard(board.id, board.title, board.description, leaderboardEntries(board.id))).join("")}
     </div>
   `;
 }
 
-function renderLeaderboardBoard(board: LeaderboardBoard, title: string, entries: LeaderboardEntry[]): string {
+function renderLeaderboardBoard(board: LeaderboardBoard, title: string, description: string, entries: LeaderboardEntry[]): string {
+  const open = state.leaderboard.openBoards[board];
   return `
-    <section class="leaderboard-board" aria-label="${escapeAttr(title)}">
+    <section class="leaderboard-board ${open ? "is-open" : "is-collapsed"}" aria-label="${escapeAttr(title)}">
       <div class="leaderboard-board-head">
-        <strong>${escapeHtml(title)}</strong>
+        <button class="leaderboard-board-toggle" type="button" data-action="toggle-leaderboard-board" data-leaderboard-board="${escapeAttr(board)}" aria-expanded="${open ? "true" : "false"}">
+          <span>${open ? "-" : "+"}</span>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(description)}</small>
+        </button>
+        <button class="leaderboard-board-copy" type="button" data-action="copy-leaderboard-board" data-leaderboard-board="${escapeAttr(board)}">复制链接</button>
       </div>
       ${
-        entries.length
+        open && entries.length
           ? `<ol class="leaderboard-list">
               ${entries.map((entry, index) => renderLeaderboardRow(entry, index, board)).join("")}
             </ol>`
-          : `<div class="service-empty">暂无榜单记录</div>`
+          : open
+            ? `<div class="service-empty">暂无榜单记录</div>`
+            : ""
       }
     </section>
   `;
@@ -1702,7 +1743,7 @@ function renderLeaderboardRow(entry: LeaderboardEntry, index: number, board: Lea
         <span>${entry.rank ?? index + 1}</span>
         <strong>${escapeHtml(entry.nickname)}</strong>
         <em>${formatNumber(entry.score)}</em>
-        <small>${board === "endless" ? `Y${entry.year}` : "第一年"}</small>
+        <small>${entry.year === 1 ? "第一年" : `Y${entry.year}`}</small>
       </button>
       ${state.leaderboard.selectedRunId === entry.runId ? renderLeaderboardDetail(entry, board) : ""}
     </li>
@@ -1716,7 +1757,7 @@ function renderLeaderboardDetail(entry: LeaderboardEntry, board: LeaderboardBoar
   return `
     <div class="leaderboard-detail">
       ${
-        board === "standard" && exams.length
+        exams.length
           ? `<div class="leaderboard-detail-scores">
               ${exams
                 .map((exam) => `<span>${SUBJECT_LABELS[exam.subject]} <strong>${formatNumber(exam.score)}</strong></span>`)
@@ -1931,6 +1972,17 @@ async function copyLeaderboardShare(): Promise<void> {
   }
 }
 
+async function copyLeaderboardBoardLink(board: LeaderboardBoard): Promise<void> {
+  const link = leaderboardBoardLink(board);
+  try {
+    await navigator.clipboard.writeText(link);
+    showCopyToast("榜单链接已复制");
+    trackEvent("leaderboard_board_link_copy", { board });
+  } catch {
+    showFooterNotice(link);
+  }
+}
+
 function buildShareText(result: RunResult, link: string, rank?: number): string {
   const playerName = publicPlayerName();
   if (rank) {
@@ -1975,22 +2027,67 @@ async function refreshLeaderboard(silent = false): Promise<void> {
     state.leaderboard = { ...state.leaderboard, status: "loading", error: undefined };
     render();
   }
-  const [standardResponse, endlessResponse] = await Promise.all([loadLeaderboard("standard"), loadLeaderboard("endless")]);
-  if (standardResponse.ok && endlessResponse.ok) {
+  const [standardHourlyResponse, endlessHourlyResponse, standardResponse, endlessResponse, negativeResponse] = await Promise.all([
+    loadLeaderboard("standard-hourly"),
+    loadLeaderboard("endless-hourly"),
+    loadLeaderboard("standard"),
+    loadLeaderboard("endless"),
+    loadLeaderboard("negative")
+  ]);
+  if (
+    standardHourlyResponse.ok &&
+    endlessHourlyResponse.ok &&
+    standardResponse.ok &&
+    endlessResponse.ok &&
+    negativeResponse.ok
+  ) {
     state.leaderboard = {
       ...state.leaderboard,
       status: "ready",
+      standardHourlyEntries: standardHourlyResponse.entries,
+      endlessHourlyEntries: endlessHourlyResponse.entries,
       standardEntries: standardResponse.entries,
       endlessEntries: endlessResponse.entries,
+      negativeEntries: negativeResponse.entries,
       error: undefined
     };
   } else {
     state.leaderboard = {
       ...state.leaderboard,
       status: "error",
-      error: standardResponse.error ?? endlessResponse.error ?? "榜单暂不可用"
+      error:
+        standardHourlyResponse.error ??
+        endlessHourlyResponse.error ??
+        standardResponse.error ??
+        endlessResponse.error ??
+        negativeResponse.error ??
+        "榜单暂不可用"
     };
   }
+  render();
+}
+
+function scheduleLeaderboardHourlyRefresh(): void {
+  if (DEBUG_ROUTE || RESULT_DEBUG_ROUTE || leaderboardHourlyRefreshTimer !== undefined) return;
+  const now = new Date();
+  const nextHour = new Date(now);
+  nextHour.setMinutes(60, 0, 0);
+  const delayMs = Math.max(1000, nextHour.getTime() - now.getTime() + 500);
+  leaderboardHourlyRefreshTimer = window.setTimeout(() => {
+    leaderboardHourlyRefreshTimer = undefined;
+    void refreshLeaderboard(true).finally(scheduleLeaderboardHourlyRefresh);
+  }, delayMs);
+}
+
+function toggleLeaderboardBoard(board: LeaderboardBoard): void {
+  state.leaderboard = {
+    ...state.leaderboard,
+    openBoards: {
+      ...state.leaderboard.openBoards,
+      [board]: !state.leaderboard.openBoards[board]
+    }
+  };
+  trackEvent("leaderboard_board_toggle", { board, open: state.leaderboard.openBoards[board] });
   render();
 }
 
@@ -2015,33 +2112,53 @@ async function submitLeaderboardEntry(): Promise<void> {
     clientResult: result
   });
   if (response.ok && response.entry) {
-    const isEndless = response.entry.year > 1;
+    const targetBoard = leaderboardBoardForEntry(response.entry);
     const rank = response.entry.rank;
     state.leaderboard = {
       status: "ready",
-      standardEntries: isEndless
-        ? state.leaderboard.standardEntries
-        : mergeLeaderboardEntry(response.entry, state.leaderboard.standardEntries, "standard"),
-      endlessEntries: isEndless
-        ? mergeLeaderboardEntry(response.entry, state.leaderboard.endlessEntries, "endless")
-        : state.leaderboard.endlessEntries,
+      standardHourlyEntries:
+        targetBoard === "standard"
+          ? mergeLeaderboardEntry(response.entry, state.leaderboard.standardHourlyEntries, "standard-hourly")
+          : state.leaderboard.standardHourlyEntries,
+      endlessHourlyEntries:
+        targetBoard === "endless"
+          ? mergeLeaderboardEntry(response.entry, state.leaderboard.endlessHourlyEntries, "endless-hourly")
+          : state.leaderboard.endlessHourlyEntries,
+      standardEntries:
+        targetBoard === "standard"
+          ? mergeLeaderboardEntry(response.entry, state.leaderboard.standardEntries, "standard")
+          : state.leaderboard.standardEntries,
+      endlessEntries:
+        targetBoard === "endless"
+          ? mergeLeaderboardEntry(response.entry, state.leaderboard.endlessEntries, "endless")
+          : state.leaderboard.endlessEntries,
+      negativeEntries:
+        targetBoard === "negative"
+          ? mergeLeaderboardEntry(response.entry, state.leaderboard.negativeEntries, "negative")
+          : state.leaderboard.negativeEntries,
+      openBoards: state.leaderboard.openBoards,
       submittedRunId: response.entry.runId,
       submittedRank: rank,
       selectedRunId: response.entry.runId
     };
-    const link = await resolveShareUrl(result, {
+    showFooterNotice(rank ? `分数已提交榜单，当前第 ${rank} 名。` : "分数已提交榜单。");
+    trackEvent("leaderboard_submit", { score: response.entry.score, year: response.entry.year });
+    render();
+    void refreshLeaderboard(true);
+    void resolveShareUrl(result, {
       source: "leaderboard",
       runId: response.entry.runId,
       rank
+    }).then((link) => {
+      if (state.leaderboard.submittedRunId !== response.entry?.runId) return;
+      state.leaderboard = {
+        ...state.leaderboard,
+        shareLink: link,
+        shareText: buildShareText(result, link, rank)
+      };
+      render();
     });
-    state.leaderboard = {
-      ...state.leaderboard,
-      shareLink: link,
-      shareText: buildShareText(result, link, rank)
-    };
-    showFooterNotice(rank ? `分数已提交榜单，当前第 ${rank} 名。` : "分数已提交榜单。");
-    trackEvent("leaderboard_submit", { score: response.entry.score, year: response.entry.year });
-    void refreshLeaderboard(true);
+    return;
   } else {
     state.leaderboard = {
       ...state.leaderboard,
@@ -2087,16 +2204,84 @@ function mergeLeaderboardEntry(
   entries: LeaderboardEntry[],
   board: LeaderboardBoard
 ): LeaderboardEntry[] {
-  return [entry, ...entries.filter((item) => item.runId !== entry.runId)]
+  const sameEndlessRun = board === "endless" || board === "endless-hourly" ? leaderboardRootSeed(entry.seed) : undefined;
+  if (
+    sameEndlessRun &&
+    entries.some((item) => leaderboardRootSeed(item.seed) === sameEndlessRun && item.year > entry.year)
+  ) {
+    return entries;
+  }
+  return [
+    entry,
+    ...entries.filter((item) => {
+      if (item.runId === entry.runId) return false;
+      if (sameEndlessRun && leaderboardRootSeed(item.seed) === sameEndlessRun) {
+        return item.year > entry.year;
+      }
+      return true;
+    })
+  ]
     .sort((left, right) => compareLeaderboardEntries(left, right, board))
     .slice(0, 10);
 }
 
 function compareLeaderboardEntries(left: LeaderboardEntry, right: LeaderboardEntry, board: LeaderboardBoard): number {
-  if (board === "endless") {
+  if (board === "negative") {
+    return left.score - right.score || left.createdAt.localeCompare(right.createdAt);
+  }
+  if (board === "endless" || board === "endless-hourly") {
     return right.year - left.year || right.score - left.score || left.createdAt.localeCompare(right.createdAt);
   }
   return right.score - left.score || left.createdAt.localeCompare(right.createdAt);
+}
+
+function leaderboardBoardForEntry(entry: LeaderboardEntry): LeaderboardBoard {
+  if (entry.score < 0) return "negative";
+  if (entry.year === 1) return "standard";
+  return "endless";
+}
+
+function leaderboardEntries(board: LeaderboardBoard): LeaderboardEntry[] {
+  if (board === "standard-hourly") return state.leaderboard.standardHourlyEntries;
+  if (board === "endless-hourly") return state.leaderboard.endlessHourlyEntries;
+  if (board === "standard") return state.leaderboard.standardEntries;
+  if (board === "endless") return state.leaderboard.endlessEntries;
+  return state.leaderboard.negativeEntries;
+}
+
+function initialLeaderboardOpenBoards(): Record<LeaderboardBoard, boolean> {
+  const selected = readLeaderboardBoardFromUrl();
+  return {
+    "standard-hourly": selected ? selected === "standard-hourly" : true,
+    "endless-hourly": selected ? selected === "endless-hourly" : true,
+    standard: selected === "standard",
+    endless: selected === "endless",
+    negative: selected === "negative"
+  };
+}
+
+function readLeaderboardBoardFromUrl(): LeaderboardBoard | undefined {
+  try {
+    const board = new URL(window.location.href).searchParams.get("board");
+    return isLeaderboardBoard(board) ? board : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLeaderboardBoard(value: string | null): value is LeaderboardBoard {
+  return Boolean(value && LEADERBOARD_BOARDS.some((board) => board.id === value));
+}
+
+function leaderboardBoardLink(board: LeaderboardBoard): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set("board", board);
+  return url.toString();
+}
+
+function leaderboardRootSeed(seed: string): string {
+  const markerIndex = seed.indexOf("-Y2");
+  return markerIndex > 0 ? seed.slice(0, markerIndex) : seed;
 }
 
 async function createShareImageDataUrl(result: RunResult, link: string): Promise<string> {
@@ -2489,10 +2674,12 @@ function decodeShareArtifacts(value: string): string[] {
 }
 
 function encodeShareNumber(value: number): string {
-  return Math.max(0, Math.round(value)).toString(36);
+  const rounded = Math.round(value);
+  return rounded < 0 ? `n${Math.abs(rounded).toString(36)}` : rounded.toString(36);
 }
 
 function decodeShareNumber(value: string): number {
+  if (value.startsWith("n")) return -Number.parseInt(value.slice(1), 36);
   return Number.parseInt(value, 36);
 }
 
@@ -2920,7 +3107,15 @@ function resetRunState(): void {
 }
 
 function resetServiceState(): void {
-  state.leaderboard = { status: "idle", standardEntries: [], endlessEntries: [] };
+  state.leaderboard = {
+    status: "idle",
+    standardEntries: [],
+    endlessEntries: [],
+    negativeEntries: [],
+    standardHourlyEntries: [],
+    endlessHourlyEntries: [],
+    openBoards: initialLeaderboardOpenBoards()
+  };
 }
 
 function openRestartConfirm(): void {

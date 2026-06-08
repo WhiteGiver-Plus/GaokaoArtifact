@@ -3,6 +3,7 @@ import { DEBUG_NICKNAME, reviewNickname, sanitizeNickname } from "../../../gh_pa
 import { assertClientResultMatches, replayDecisionTrace } from "../_lib/verifyRun.js";
 import { checkRateLimit } from "../_lib/rateLimit.js";
 import {
+  clientIp,
   clientIpHash,
   hashText,
   jsonResponse,
@@ -54,6 +55,7 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
       return sendError(400, "debug_run_not_ranked");
     }
 
+    const ip = clientIp(context.request).slice(0, 120);
     const ipHash = await clientIpHash(context.request, context.env);
     const allowed = await checkRateLimit(context.env.DB, {
       scope: "leaderboard",
@@ -68,8 +70,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
     const run = await context.env.DB.prepare(
       `insert into runs
          (id, trace_hash, session_id, nickname, seed, subjects, year, threshold, total_score,
-          artifact_ids, artifact_names, result_payload, decision_trace, app_version, ip_hash)
-       values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+          artifact_ids, artifact_names, result_payload, decision_trace, app_version, ip_hash, ip)
+       values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
        on conflict(trace_hash) do update set
          session_id = excluded.session_id,
          nickname = excluded.nickname,
@@ -83,7 +85,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
          result_payload = excluded.result_payload,
          decision_trace = excluded.decision_trace,
          app_version = excluded.app_version,
-         ip_hash = excluded.ip_hash
+         ip_hash = excluded.ip_hash,
+         ip = excluded.ip
        returning id`
     )
       .bind(
@@ -101,14 +104,14 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
         jsonText(verified),
         jsonText(body.trace),
         body.appVersion ? jsonText(body.appVersion) : null,
-        ipHash
+        ipHash,
+        ip
       )
       .first<RunRow>();
     if (!run) throw new Error("run_write_failed");
 
     const sharePayload: LeaderboardSharePayload = {
       seed: verified.seed,
-      trace: body.trace,
       ...(body.appVersion ? { appVersion: body.appVersion } : {}),
       subjects: verified.subjects,
       exams: verified.exams.map((exam) => ({
@@ -154,11 +157,10 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
     if (!entry) throw new Error("leaderboard_write_failed");
 
     const rank = await leaderboardRank(context.env.DB, entry.score, entry.year, entry.created_at);
-    const storedSharePayload = parseJsonField<LeaderboardSharePayload>(entry.share_payload) ?? sharePayload;
-    const rankedSharePayload = { ...storedSharePayload, rank };
-    await context.env.DB.prepare("update leaderboard_entries set share_payload = ?2 where id = ?1")
-      .bind(entry.id, jsonText(rankedSharePayload))
-      .run();
+    const responseSharePayload = {
+      ...(parseJsonField<LeaderboardSharePayload>(entry.share_payload) ?? sharePayload),
+      rank
+    };
 
     return jsonResponse({
       ok: true,
@@ -173,8 +175,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
         seed: entry.seed,
         artifactCount: entry.artifact_count,
         createdAt: entry.created_at,
-        appVersion: parseJsonField(entry.app_version) ?? rankedSharePayload.appVersion,
-        share: rankedSharePayload
+        appVersion: parseJsonField(entry.app_version) ?? responseSharePayload.appVersion,
+        share: responseSharePayload
       }
     });
   } catch (error) {
@@ -186,34 +188,97 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
 }
 
 async function leaderboardRank(db: D1Database, score: number, year: number, createdAt: string): Promise<number> {
-  if (year > 1) {
-    const [higherYear, higherScoreInYear, earlierTie] = await Promise.all([
-      countEntries(db, "select count(*) as count from leaderboard_entries where year > ?1", year),
-      countEntries(db, "select count(*) as count from leaderboard_entries where year = ?1 and score > ?2", year, score),
-      countEntries(
+  if (score < 0) {
+    return (
+      (await countEntries(
         db,
-        "select count(*) as count from leaderboard_entries where year = ?1 and score = ?2 and created_at < ?3",
+        `select coalesce(sum(count), 0) as count
+         from (
+           select count(*) as count from leaderboard_entries where score < ?1
+           union all
+           select count(*) as count from leaderboard_entries where score = ?1 and created_at < ?2
+         )`,
+        score,
+        createdAt
+      )) + 1
+    );
+  }
+
+  if (year > 1) {
+    return (
+      (await countEntries(
+        db,
+        `select coalesce(sum(count), 0) as count
+         from (
+           select count(*) as count
+           from leaderboard_entries as entry
+           where entry.score >= 0
+             and entry.year > 1
+             and not exists (
+               select 1
+               from leaderboard_entries as higher
+               where higher.score >= 0
+                 and higher.year > entry.year
+                 and ${leaderboardRootSeedSql("higher")} = ${leaderboardRootSeedSql("entry")}
+             )
+             and entry.year > ?1
+           union all
+           select count(*) as count
+           from leaderboard_entries as entry
+           where entry.score >= 0
+             and entry.year > 1
+             and not exists (
+               select 1
+               from leaderboard_entries as higher
+               where higher.score >= 0
+                 and higher.year > entry.year
+                 and ${leaderboardRootSeedSql("higher")} = ${leaderboardRootSeedSql("entry")}
+             )
+             and entry.year = ?1
+             and entry.score > ?2
+           union all
+           select count(*) as count
+           from leaderboard_entries as entry
+           where entry.score >= 0
+             and entry.year > 1
+             and not exists (
+               select 1
+               from leaderboard_entries as higher
+               where higher.score >= 0
+                 and higher.year > entry.year
+                 and ${leaderboardRootSeedSql("higher")} = ${leaderboardRootSeedSql("entry")}
+             )
+             and entry.year = ?1
+             and entry.score = ?2
+             and entry.created_at < ?3
+         )`,
         year,
         score,
         createdAt
-      )
-    ]);
-    return higherYear + higherScoreInYear + earlierTie + 1;
+      )) + 1
+    );
   }
 
-  const [higherScore, earlierTie] = await Promise.all([
-    countEntries(db, "select count(*) as count from leaderboard_entries where year = 1 and score > ?1", score),
-    countEntries(
+  return (
+    (await countEntries(
       db,
-      "select count(*) as count from leaderboard_entries where year = 1 and score = ?1 and created_at < ?2",
+      `select coalesce(sum(count), 0) as count
+         from (
+         select count(*) as count from leaderboard_entries where year = 1 and score >= 0 and score > ?1
+         union all
+         select count(*) as count from leaderboard_entries where year = 1 and score >= 0 and score = ?1 and created_at < ?2
+       )`,
       score,
       createdAt
-    )
-  ]);
-  return higherScore + earlierTie + 1;
+    )) + 1
+  );
 }
 
 async function countEntries(db: D1Database, sql: string, ...bindings: D1Value[]): Promise<number> {
   const row = await db.prepare(sql).bind(...bindings).first<{ count: number }>();
   return row?.count ?? 0;
+}
+
+function leaderboardRootSeedSql(alias: string): string {
+  return `case when instr(${alias}.seed, '-Y2') > 0 then substr(${alias}.seed, 1, instr(${alias}.seed, '-Y2') - 1) else ${alias}.seed end`;
 }

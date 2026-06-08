@@ -115,6 +115,8 @@ export interface LeaderboardResponse {
   error?: string;
 }
 
+export type LeaderboardPeriod = "standard" | "endless" | "negative" | "standard-hourly" | "endless-hourly";
+
 export interface ShareReportSubject {
   label: string;
   score: string;

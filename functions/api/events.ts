@@ -1,5 +1,5 @@
 import type { EventsRequest } from "../../gh_pages_local_game/src/core/trace.js";
-import { clientIpHash, jsonResponse, jsonText, nowIso, randomId, readJsonBody, sendError } from "./_lib/http.js";
+import { clientIp, clientIpHash, jsonResponse, jsonText, nowIso, randomId, readJsonBody, sendError } from "./_lib/http.js";
 import type { D1PreparedStatement, HandlerContext } from "./_lib/types.js";
 
 const MAX_EVENTS_PER_BATCH = 32;
@@ -17,6 +17,7 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
       .filter((event) => typeof event.name === "string" && event.name.length <= 80);
     if (events.length === 0) return jsonResponse({ ok: true });
 
+    const ip = clientIp(context.request).slice(0, 120);
     const ipHash = await clientIpHash(context.request, context.env);
     const sampleRate = rawSampleRate(context.env.EVENT_RAW_SAMPLE_RATE);
     const now = nowIso();
@@ -45,8 +46,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
         statements.push(
           context.env.DB.prepare(
             `insert into analytics_events
-               (id, session_id, event_name, page_path, payload, occurred_at, app_version, ip_hash, created_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+               (id, session_id, event_name, page_path, payload, occurred_at, app_version, ip_hash, ip, created_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
           ).bind(
             randomId(),
             sessionId,
@@ -56,6 +57,7 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
             occurredAt,
             body.appVersion ? jsonText(body.appVersion) : null,
             ipHash,
+            ip,
             now
           )
         );
@@ -68,8 +70,9 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
                (session_id, first_page_path, first_landing_url, first_referrer, first_source,
                 first_share_code, first_has_compact_share, first_seen_at,
                 last_page_path, last_landing_url, last_referrer, last_source,
-                last_share_code, last_has_compact_share, last_seen_at, open_count)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
+                last_share_code, last_has_compact_share, last_seen_at, open_count,
+                first_ip, first_ip_hash, last_ip, last_ip_hash)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?9, ?10)
              on conflict(session_id) do update set
                last_page_path = excluded.last_page_path,
                last_landing_url = excluded.last_landing_url,
@@ -78,6 +81,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
                last_share_code = excluded.last_share_code,
                last_has_compact_share = excluded.last_has_compact_share,
                last_seen_at = excluded.last_seen_at,
+               last_ip = excluded.last_ip,
+               last_ip_hash = excluded.last_ip_hash,
                open_count = session_landing_sources.open_count + 1`
           ).bind(
             sessionId,
@@ -87,7 +92,9 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
             textProperty(event.properties, "source", 120) ?? "direct",
             shareCodeProperty(event.properties),
             booleanProperty(event.properties, "hasCompactShare") ? 1 : 0,
-            occurredAt
+            occurredAt,
+            ip,
+            ipHash
           )
         );
 

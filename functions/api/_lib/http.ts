@@ -36,11 +36,16 @@ export async function hashText(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function clientIpHash(request: Request, env: Env): Promise<string> {
-  const ip =
+export function clientIp(request: Request): string {
+  return (
     request.headers.get("cf-connecting-ip") ??
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "unknown";
+    "unknown"
+  );
+}
+
+export async function clientIpHash(request: Request, env: Env): Promise<string> {
+  const ip = clientIp(request);
   return hashText(`${ip}:${leaderboardSalt(env)}`);
 }
 

@@ -1,5 +1,6 @@
 import type { CreateShareRequest, ShareReportPayload } from "../../gh_pages_local_game/src/core/trace.js";
 import {
+  clientIp,
   clientIpHash,
   jsonResponse,
   jsonText,
@@ -38,14 +39,15 @@ async function createShare(context: HandlerContext): Promise<Response> {
     const report = normalizeShareReport(body.report, body.rank);
     if (!report) return sendError(400, "invalid_share_report");
 
+    const ip = clientIp(context.request).slice(0, 120);
     const ipHash = await clientIpHash(context.request, context.env);
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const code = createShareCode();
       try {
         await context.env.DB.prepare(
           `insert into share_reports
-             (id, share_code, session_id, source, run_id, player_name, rank, payload, app_version, ip_hash)
-           values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+             (id, share_code, session_id, source, run_id, player_name, rank, payload, app_version, ip_hash, ip)
+           values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
         )
           .bind(
             randomId(),
@@ -57,7 +59,8 @@ async function createShare(context: HandlerContext): Promise<Response> {
             report.rank ?? null,
             jsonText(report),
             body.appVersion ? jsonText(body.appVersion) : null,
-            ipHash
+            ipHash,
+            ip
           )
           .run();
         return jsonResponse({ ok: true, code, report });
@@ -100,7 +103,7 @@ function normalizeShareReport(value: unknown, rank?: number): ShareReportPayload
   const report = value as Partial<ShareReportPayload>;
   const playerName = normalizeText(report.playerName, 32);
   const seed = normalizeText(report.seed, 120);
-  const score = normalizeInteger(report.score, 0, Number.MAX_SAFE_INTEGER);
+  const score = normalizeInteger(report.score, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
   const year = normalizeInteger(report.year, 1, 9999);
   const threshold = normalizeInteger(report.threshold, 750, Number.MAX_SAFE_INTEGER);
   const title = normalizeText(report.title, 48);

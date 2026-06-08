@@ -4,6 +4,7 @@ import type {
   FeedbackRequest,
   FeedbackResponse,
   LeaderboardResponse,
+  LeaderboardPeriod,
   ShareReportResponse,
   VerifyRunRequest,
   VerifyRunResponse
@@ -110,7 +111,9 @@ export async function verifyRun(request: Omit<VerifyRunRequest, "sessionId">): P
   });
 }
 
-export async function loadLeaderboard(period: "standard" | "endless" = "standard"): Promise<LeaderboardResponse> {
+export async function loadLeaderboard(
+  period: LeaderboardPeriod = "standard"
+): Promise<LeaderboardResponse> {
   const response = await fetch(`${apiBaseUrl()}/leaderboard?period=${period}&page=1&pageSize=10`);
   if (!response.ok) {
     return { ok: false, entries: [], error: `HTTP ${response.status}` };
