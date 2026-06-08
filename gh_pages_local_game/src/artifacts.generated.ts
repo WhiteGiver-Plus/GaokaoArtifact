@@ -36,7 +36,7 @@ export const LOCAL_ARTIFACTS = [
       "高正确率",
       "节奏题"
     ],
-    "description": "每场考试每 5 道题，正确率 +200%。",
+    "description": "每场考试每第 5 道题，正确率 +200%。",
     "modifiers": [],
     "triggers": [
       {
@@ -517,7 +517,7 @@ export const LOCAL_ARTIFACTS = [
       "体力",
       "续航"
     ],
-    "description": "每场考试每 5 道题结束时，体力 +20。",
+    "description": "每场考试每第 5 道题结束时，体力 +20。",
     "modifiers": [],
     "triggers": [
       {
@@ -1213,7 +1213,7 @@ export const LOCAL_ARTIFACTS = [
       "节奏题",
       "倍率成长"
     ],
-    "description": "每场考试每 3 道题，正确率 x1.5，得分倍率 x2。",
+    "description": "每场考试每第 3 道题，正确率 x1.5，得分倍率 x2。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -1254,7 +1254,7 @@ export const LOCAL_ARTIFACTS = [
       "节奏题",
       "倍率成长"
     ],
-    "description": "每场考试每 10 道题，正确率 x2，得分倍率 x5。",
+    "description": "每场考试每第 10 道题，正确率 x2，得分倍率 x5。",
     "modifiers": [
       {
         "target": "finalAccuracy",
