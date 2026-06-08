@@ -4628,3 +4628,508 @@
   0% { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
   100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
 }
+
+/* UI bugfix pass: keep exam controls reachable and make mobile drafts fit the first viewport. */
+.exam-tool-dock {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
+  z-index: 120;
+  pointer-events: auto;
+}
+
+.exam-icon-button {
+  touch-action: manipulation;
+}
+
+.phase-exam .info-footer {
+  position: relative;
+  z-index: 90;
+}
+
+.phase-exam .info-footer details,
+.phase-exam .feedback-dock,
+.phase-exam .mobile-drawer {
+  pointer-events: auto;
+}
+
+@media (max-width: 760px) {
+  .draft-screen {
+    gap: 8px;
+    padding: 6px;
+    min-height: calc(100dvh - 72px);
+  }
+
+  .draft-heading {
+    gap: 6px;
+    padding: 10px 9px 8px 34px;
+    border-width: 1.5px;
+    box-shadow: 3px 3px rgba(17, 24, 39, 0.08);
+  }
+
+  .draft-heading:before {
+    top: 9px;
+    bottom: 9px;
+    left: 11px;
+    width: 6px;
+  }
+
+  .draft-heading:after {
+    top: 8px;
+    right: 8px;
+    padding: 2px 5px;
+    font-size: 9px;
+  }
+
+  .draft-heading .mono-label {
+    font-size: 9px;
+  }
+
+  .draft-heading h1 {
+    max-width: calc(100% - 80px);
+    margin-top: 2px;
+    font-size: clamp(21px, 6vw, 26px);
+    line-height: 1.02;
+  }
+
+  .draft-status-rail {
+    gap: 4px;
+  }
+
+  .draft-status-rail span {
+    gap: 1px;
+    padding: 5px 6px;
+    border-radius: 5px;
+    box-shadow: 2px 2px rgba(17, 24, 39, 0.06);
+  }
+
+  .draft-status-rail small {
+    font-size: 9px;
+  }
+
+  .draft-status-rail strong {
+    font-size: 15px;
+  }
+
+  .ticket-profile {
+    margin-top: 4px;
+    gap: 4px;
+  }
+
+  .player-name-field.name-review-field,
+  .subject-picker {
+    min-height: 30px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .player-name-field.name-review-field .name-input {
+    min-height: 28px;
+    font-size: 12px;
+  }
+
+  .subject-picker-head {
+    margin-bottom: 4px;
+  }
+
+  .subject-chip {
+    min-height: 27px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+
+  .draft-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .draft-card {
+    min-height: 148px;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: 4px;
+    padding: 8px 8px 7px;
+    border-width: 1.5px;
+    box-shadow: 2px 2px rgba(17, 24, 39, 0.1);
+  }
+
+  .draft-card-watermark {
+    right: 5px;
+    bottom: 4px;
+    font-size: 48px;
+  }
+
+  .draft-card-top {
+    min-height: 20px;
+  }
+
+  .draft-index {
+    padding: 2px 4px;
+    font-size: 9px;
+  }
+
+  .draft-card .term-corner {
+    top: 6px;
+    right: 6px;
+  }
+
+  .draft-card .term-corner .rarity {
+    padding: 2px 4px;
+    font-size: 10px;
+  }
+
+  .draft-card h2 {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 1px 0 0;
+    padding-right: 54px;
+    font-size: clamp(15px, 4.5vw, 19px);
+    line-height: 1.06;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .draft-card p {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 0;
+    color: #374151;
+    font-size: 11.5px;
+    line-height: 1.28;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .draft-card-footer {
+    gap: 4px;
+    padding-top: 4px;
+  }
+
+  .draft-card-footer span {
+    display: none;
+  }
+
+  .draft-card-footer strong {
+    transform: none;
+    border-width: 1.5px;
+    padding: 2px 4px;
+    font-size: 9px;
+  }
+
+  .skip-draft-button {
+    min-height: 32px;
+    margin-top: 0;
+    font-size: 12px;
+  }
+
+  .existing-build {
+    max-height: 64px;
+    overflow: auto;
+    padding: 8px;
+  }
+
+  .exam-tool-dock {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
+    grid-template-columns: repeat(4, 32px);
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .exam-icon-button {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (max-width: 420px) {
+  .draft-screen {
+    gap: 6px;
+    padding: 5px;
+  }
+
+  .draft-heading {
+    padding: 8px 8px 7px 31px;
+  }
+
+  .draft-heading h1 {
+    max-width: calc(100% - 68px);
+    font-size: clamp(20px, 5.8vw, 24px);
+  }
+
+  .draft-status-rail span {
+    padding: 4px 5px;
+  }
+
+  .draft-card {
+    min-height: 140px;
+    padding: 7px;
+  }
+
+  .draft-card h2 {
+    padding-right: 48px;
+    font-size: clamp(14px, 4.4vw, 18px);
+  }
+
+  .draft-card p {
+    font-size: 11px;
+    line-height: 1.24;
+  }
+
+  .exam-tool-dock {
+    grid-template-columns: repeat(4, 31px);
+  }
+
+  .exam-icon-button {
+    width: 31px;
+    height: 31px;
+  }
+}
+
+/* Final UI fix pass: viewport-centered settlement, denser desktop status, reliable exam tools. */
+.exam-tool-dock {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
+  z-index: 160;
+  grid-template-columns: repeat(4, 38px);
+  gap: 6px;
+  padding: 5px;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transform: translateZ(0);
+}
+
+.exam-icon-button {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  touch-action: manipulation;
+}
+
+.score-choice-backdrop {
+  z-index: 190;
+}
+
+.restart-confirm-backdrop {
+  z-index: 210;
+}
+
+.exam-settlement-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  width: 100dvw;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  place-items: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 14px) calc(env(safe-area-inset-bottom, 0px) + 16px) calc(env(safe-area-inset-left, 0px) + 14px);
+  overflow: auto;
+  border-radius: 0;
+}
+
+.settlement-card {
+  width: min(560px, calc(100dvw - 28px));
+  max-width: 100%;
+  max-height: none;
+  box-sizing: border-box;
+  justify-self: center;
+  align-self: center;
+  margin: auto;
+}
+
+.settlement-formula {
+  min-width: 0;
+}
+
+.settlement-formula span {
+  min-width: 0;
+}
+
+@media (min-width: 901px) {
+  .paper-status-layout {
+    grid-template-columns: minmax(168px, 0.42fr) minmax(420px, 1.38fr) minmax(220px, 0.54fr);
+    grid-template-areas: "title status score";
+    gap: 9px;
+  }
+
+  .compact-paper-title {
+    grid-area: title;
+    min-height: 86px;
+  }
+
+  .paper-status-grid {
+    grid-area: status;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .paper-score-total {
+    grid-area: score;
+  }
+
+  .paper-score-total,
+  .paper-status-tile {
+    min-height: 86px;
+  }
+
+  .paper-score-total {
+    padding-top: 14px;
+  }
+}
+
+@media (min-width: 1121px) {
+  .phase-exam .compact-exam-grid .support-drawers {
+    box-sizing: border-box;
+    padding-top: 64px;
+  }
+}
+
+@media (max-width: 760px) {
+  .exam-tool-dock {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
+    grid-template-columns: repeat(4, 35px);
+    gap: 5px;
+    padding: 4px;
+  }
+
+  .exam-icon-button {
+    width: 35px;
+    height: 35px;
+    min-width: 35px;
+    min-height: 35px;
+  }
+
+  .exam-settlement-layer {
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 10px) calc(env(safe-area-inset-bottom, 0px) + 12px) calc(env(safe-area-inset-left, 0px) + 10px);
+  }
+
+  .settlement-card {
+    width: min(560px, calc(100dvw - 20px));
+    gap: 8px;
+    padding: 12px 11px 12px 12px;
+  }
+
+  .settlement-formula {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .settlement-formula i {
+    display: none;
+  }
+
+  .settlement-formula span {
+    width: auto;
+    flex: none;
+    padding: 7px 6px;
+  }
+
+  .settlement-bonus {
+    grid-column: 1 / -1;
+  }
+
+  .settlement-formula b {
+    font-size: 9px;
+  }
+
+  .settlement-formula strong {
+    font-size: clamp(21px, 7vw, 28px);
+  }
+
+  .settlement-card-head,
+  .settlement-formula,
+  .settlement-score-shell,
+  .settlement-stat-grid,
+  .settlement-subject-strip,
+  .settlement-card-link {
+    padding-left: 18px;
+  }
+
+  .settlement-card .primary-button {
+    margin-left: 18px;
+  }
+}
+
+@media (max-width: 420px) {
+  .exam-tool-dock {
+    grid-template-columns: repeat(4, 33px);
+    gap: 4px;
+  }
+
+  .exam-icon-button {
+    width: 33px;
+    height: 33px;
+    min-width: 33px;
+    min-height: 33px;
+  }
+
+  .settlement-card {
+    width: min(560px, calc(100dvw - 18px));
+  }
+}
+
+/* Desktop alignment pass: prevent the exam sheet from invading the side rail, and center draft cards. */
+@media (min-width: 1121px) {
+  .paper-field {
+    width: min(1880px, calc(100dvw - 64px));
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .compact-exam-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 31vw, 560px);
+    gap: clamp(18px, 2vw, 28px);
+    align-items: start;
+  }
+
+  .compact-exam-grid .exam-stage,
+  .compact-exam-grid .support-drawers,
+  .exam-priority,
+  .exam-paper-header,
+  .question-card,
+  .trigger-stage {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .compact-exam-grid .exam-stage {
+    overflow: clip;
+  }
+
+  .paper-status-layout {
+    grid-template-columns: minmax(128px, 0.38fr) minmax(0, 1.34fr) minmax(176px, 0.52fr);
+  }
+
+  .paper-status-grid {
+    min-width: 0;
+  }
+
+  .phase-exam .compact-exam-grid .support-drawers {
+    padding-top: 72px;
+  }
+
+  .draft-screen {
+    justify-items: center;
+  }
+
+  .draft-grid {
+    width: min(1720px, calc(100dvw - 112px));
+    max-width: 100%;
+    margin: 8px auto 0;
+    justify-content: center;
+    grid-template-columns: repeat(4, minmax(260px, 390px));
+    gap: clamp(18px, 2vw, 26px);
+  }
+
+  .draft-card {
+    width: 100%;
+  }
+}

@@ -69,6 +69,7 @@ export async function flushEvents(): Promise<void> {
   const events = eventQueue;
   eventQueue = [];
   if (events.length === 0) return;
+  if (shouldSkipLocalAnalytics()) return;
   const payload = JSON.stringify({ sessionId: sessionId(), appVersion: APP_VERSION, events });
   const url = `${apiBaseUrl()}/events`;
   try {
@@ -85,6 +86,12 @@ export async function flushEvents(): Promise<void> {
   } catch {
     // Analytics must never interrupt gameplay.
   }
+}
+
+function shouldSkipLocalAnalytics(): boolean {
+  const hasConfiguredApi = Boolean(import.meta.env.VITE_API_BASE_URL?.trim());
+  if (hasConfiguredApi) return false;
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname === "::1";
 }
 
 export async function submitFeedback(request: Omit<FeedbackRequest, "sessionId">): Promise<FeedbackResponse> {
