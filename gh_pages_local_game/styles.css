@@ -1249,7 +1249,8 @@
   flex-wrap: wrap;
 }
 
-.leaderboard-share-box {
+.leaderboard-share-box,
+.leaderboard-board-link-box {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1264,7 +1265,9 @@
 }
 
 .leaderboard-share-box strong,
-.leaderboard-share-box small {
+.leaderboard-share-box small,
+.leaderboard-board-link-box strong,
+.leaderboard-board-link-box small {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -1272,13 +1275,15 @@
   white-space: nowrap;
 }
 
-.leaderboard-share-box strong {
+.leaderboard-share-box strong,
+.leaderboard-board-link-box strong {
   color: #065f46;
   font-size: 15px;
   font-weight: 950;
 }
 
-.leaderboard-share-box small {
+.leaderboard-share-box small,
+.leaderboard-board-link-box small {
   margin-top: 2px;
   color: var(--muted);
   font-family: var(--mono);
@@ -1299,15 +1304,14 @@
 
 .leaderboard-board-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
   padding: 0 2px 0 28px;
 }
 
-.leaderboard-board-toggle,
-.leaderboard-board-copy {
+.leaderboard-board-toggle {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -1358,19 +1362,8 @@
   white-space: nowrap;
 }
 
-.leaderboard-board-copy {
-  min-height: 36px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
 .leaderboard-board-toggle:hover,
-.leaderboard-board-toggle:focus-visible,
-.leaderboard-board-copy:hover,
-.leaderboard-board-copy:focus-visible {
+.leaderboard-board-toggle:focus-visible {
   outline: 2px solid rgba(37, 99, 235, 0.24);
   outline-offset: -2px;
   border-color: var(--line-strong);
@@ -1940,12 +1933,14 @@
     min-height: 38px;
   }
 
-  .leaderboard-share-box {
+  .leaderboard-share-box,
+  .leaderboard-board-link-box {
     grid-template-columns: 1fr;
     padding-left: 10px;
   }
 
-  .leaderboard-share-box .secondary-button {
+  .leaderboard-share-box .secondary-button,
+  .leaderboard-board-link-box .secondary-button {
     width: 100%;
   }
 
@@ -1960,10 +1955,6 @@
 
   .leaderboard-board-toggle small {
     grid-column: 2;
-  }
-
-  .leaderboard-board-copy {
-    width: 100%;
   }
 
   .leaderboard-row {

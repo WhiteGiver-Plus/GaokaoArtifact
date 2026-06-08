@@ -1721,8 +1721,8 @@ function renderLeaderboardBoard(board: LeaderboardBoard, title: string, descript
           <strong>${escapeHtml(title)}</strong>
           <small>${escapeHtml(description)}</small>
         </button>
-        <button class="leaderboard-board-copy" type="button" data-action="copy-leaderboard-board" data-leaderboard-board="${escapeAttr(board)}">复制链接</button>
       </div>
+      ${open ? renderLeaderboardBoardLinkBox(board, title) : ""}
       ${
         open && entries.length
           ? `<ol class="leaderboard-list">
@@ -1733,6 +1733,20 @@ function renderLeaderboardBoard(board: LeaderboardBoard, title: string, descript
             : ""
       }
     </section>
+  `;
+}
+
+function renderLeaderboardBoardLinkBox(board: LeaderboardBoard, title: string): string {
+  const link = leaderboardBoardLink(board);
+  return `
+    <div class="leaderboard-board-link-box" data-leaderboard-board="${escapeAttr(board)}">
+      <div>
+        <span class="mono-label">BOARD SHARE</span>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(link)}</small>
+      </div>
+      <button class="secondary-button" type="button" data-action="copy-leaderboard-board">复制榜单链接</button>
+    </div>
   `;
 }
 
