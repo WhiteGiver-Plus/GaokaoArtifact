@@ -1834,7 +1834,7 @@ function renderSharedReport(report: SharedReport): string {
           </div>
         </section>
         <div class="result-actions">
-          <button class="primary-button" type="button" data-action="restart">本地开考</button>
+          <button class="primary-button" type="button" data-action="restart">重新开始</button>
         </div>
       </div>
     </section>
@@ -1912,7 +1912,7 @@ async function copyShareLink(): Promise<void> {
   const text = buildShareText(result, link, state.leaderboard.submittedRank);
   try {
     await navigator.clipboard.writeText(text);
-    showCopyToast("已复制");
+    showCopyToast("已复制链接");
     trackEvent("share_copy", { score: Math.round(result.totalScore), year: result.year });
   } catch {
     showFooterNotice(text);
