@@ -38,7 +38,7 @@ export async function replayDecisionTrace(trace: DecisionTrace): Promise<RunResu
       throw new Error("invalid_endless_transition");
     }
     const expectedYear = previous.year + 1;
-    const expectedThreshold = Math.ceil(previous.threshold * 3);
+    const expectedThreshold = Math.ceil(previous.threshold * 100);
     const expectedSeed = `${previous.seed}-Y${expectedYear}`;
     if (
       segment.mode !== "endless" ||

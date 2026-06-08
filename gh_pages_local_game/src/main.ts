@@ -1447,7 +1447,7 @@ function renderHelpDoc(): string {
       </section>
       <section>
         <h3>无尽模式</h3>
-        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，录取线从 750 开始每年 x3。</p>
+        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，录取线每年 x100。</p>
       </section>
       <section>
         <h3>操作</h3>
@@ -1835,7 +1835,7 @@ function resultTitle(_score: number): string {
 }
 
 function nextEndlessThreshold(threshold: number): number {
-  return Math.ceil(threshold * 3);
+  return Math.ceil(threshold * 100);
 }
 
 function renderFooter(): string {
