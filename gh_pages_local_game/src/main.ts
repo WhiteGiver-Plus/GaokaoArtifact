@@ -49,12 +49,34 @@ const RESULT_DEBUG_ROUTE = isResultDebugRoute();
 const SPEED_MULTIPLIERS = [1, 2, 4, 8] as const satisfies readonly SpeedMultiplier[];
 const DEFAULT_SPEED_MULTIPLIER: SpeedMultiplier = 2;
 const BASE_SPEED_MS = 920;
+const BGM_STORAGE_KEY = "gaokao-bgm-enabled";
+const BGM_VOLUME_STORAGE_KEY = "gaokao-bgm-volume";
+const SFX_VOLUME_STORAGE_KEY = "gaokao-sfx-volume";
+const DEFAULT_BGM_VOLUME = 0.52;
+const DEFAULT_SFX_VOLUME = 0.5;
+const SFX_BASE_VOLUME = 0.5;
+const SFX_POOL_SIZE = 4;
+const BGM_SRC = audioAssetUrl("bgm/happy-synths-loop.ogg");
+const SFX_SOURCES = {
+  uiClick: audioAssetUrl("sfx/ui-click.ogg"),
+  draftSelect: audioAssetUrl("sfx/draft-select.ogg"),
+  popupQuestion: audioAssetUrl("sfx/popup-question.ogg"),
+  artifactTrigger: audioAssetUrl("sfx/artifact-trigger.ogg"),
+  rareTrigger: audioAssetUrl("sfx/rare-trigger.ogg"),
+  legendaryTrigger: audioAssetUrl("sfx/legendary-trigger.ogg"),
+  scoreTick: audioAssetUrl("sfx/score-tick.ogg"),
+  scoreBonus: audioAssetUrl("sfx/score-bonus.ogg"),
+  chainGlitch: audioAssetUrl("sfx/chain-glitch.ogg"),
+  chainJackpot: audioAssetUrl("sfx/chain-jackpot.ogg"),
+  failError: audioAssetUrl("sfx/fail-error.ogg")
+} as const;
 
 type Phase = "start" | "loading" | "draft" | "exam" | "result";
 type EventTone = "score" | "term" | "chain" | "fail" | "idle";
 type EffectIntensity = "low" | "medium" | "high" | "jackpot";
 type SpeedMultiplier = 1 | 2 | 4 | 8;
 type DrawerKey = "state" | "terms" | "help" | "log" | "footerHelp";
+type SoundEffectKey = keyof typeof SFX_SOURCES;
 type VisualEventKind =
   | "score:add"
   | "score:bank"
@@ -192,6 +214,10 @@ interface UiState {
   endlessYear: number;
   scoreThreshold: number;
   autoPlay: boolean;
+  bgmEnabled: boolean;
+  bgmVolume: number;
+  sfxVolume: number;
+  audioPanelOpen: boolean;
   speedMultiplier: SpeedMultiplier;
   speedMs: number;
   skipToSettlement: boolean;
@@ -240,6 +266,10 @@ const state: UiState = {
   endlessYear: RESULT_DEBUG_RUN?.year ?? 1,
   scoreThreshold: RESULT_DEBUG_RUN?.threshold ?? 750,
   autoPlay: true,
+  bgmEnabled: readBgmEnabled(),
+  bgmVolume: readStoredVolume(BGM_VOLUME_STORAGE_KEY, DEFAULT_BGM_VOLUME),
+  sfxVolume: readStoredVolume(SFX_VOLUME_STORAGE_KEY, DEFAULT_SFX_VOLUME),
+  audioPanelOpen: false,
   speedMultiplier: DEFAULT_SPEED_MULTIPLIER,
   speedMs: speedDelayMs(DEFAULT_SPEED_MULTIPLIER),
   skipToSettlement: false,
@@ -260,6 +290,165 @@ const state: UiState = {
 
 let playbackDelayResolvers: Array<() => void> = [];
 let suppressNextToolClickUntil = 0;
+let bgmAudio: HTMLAudioElement | undefined;
+const sfxPools = new Map<SoundEffectKey, HTMLAudioElement[]>();
+const lastSfxAt = new Map<SoundEffectKey, number>();
+
+function audioAssetUrl(path: string): string {
+  return new URL(/* @vite-ignore */ `../audio/${path}`, import.meta.url).toString();
+}
+
+function readBgmEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(BGM_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function persistBgmEnabled(): void {
+  try {
+    window.localStorage.setItem(BGM_STORAGE_KEY, state.bgmEnabled ? "on" : "off");
+  } catch {
+    // localStorage may be unavailable in private or restricted contexts.
+  }
+}
+
+function readStoredVolume(key: string, fallback: number): number {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored === null) return fallback;
+    return clampVolume(Number(stored));
+  } catch {
+    return fallback;
+  }
+}
+
+function persistVolume(key: string, value: number): void {
+  try {
+    window.localStorage.setItem(key, String(clampVolume(value)));
+  } catch {
+    // localStorage may be unavailable in private or restricted contexts.
+  }
+}
+
+function clampVolume(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_BGM_VOLUME;
+  return Math.min(1, Math.max(0, value));
+}
+
+function volumePercent(value: number): string {
+  return `${Math.round(clampVolume(value) * 100)}%`;
+}
+
+function ensureBgmAudio(): HTMLAudioElement {
+  if (!bgmAudio) {
+    bgmAudio = new Audio(BGM_SRC);
+    bgmAudio.loop = true;
+    bgmAudio.volume = state.bgmVolume;
+    bgmAudio.preload = "auto";
+  }
+  return bgmAudio;
+}
+
+function ensureSfxAudio(key: SoundEffectKey): HTMLAudioElement {
+  const pool = sfxPools.get(key) ?? [];
+  const reusable = pool.find((audio) => audio.paused || audio.ended);
+  if (reusable) return reusable;
+
+  const audio = new Audio(SFX_SOURCES[key]);
+  audio.preload = "auto";
+  if (pool.length < SFX_POOL_SIZE) {
+    pool.push(audio);
+    sfxPools.set(key, pool);
+  }
+  return audio;
+}
+
+function playSfx(
+  key: SoundEffectKey,
+  options: { volume?: number; playbackRate?: number; minIntervalMs?: number } = {}
+): void {
+  if (!state.bgmEnabled) return;
+  const now = Date.now();
+  const lastPlayedAt = lastSfxAt.get(key) ?? 0;
+  if (options.minIntervalMs && now - lastPlayedAt < options.minIntervalMs) return;
+  lastSfxAt.set(key, now);
+
+  const audio = ensureSfxAudio(key);
+  audio.volume = clampVolume((options.volume ?? SFX_BASE_VOLUME) * state.sfxVolume);
+  audio.playbackRate = options.playbackRate ?? 1;
+  try {
+    audio.currentTime = 0;
+  } catch {
+    // Some browsers disallow seeking before enough data is buffered.
+  }
+  void audio.play().catch(() => {});
+}
+
+function pauseAllSfx(): void {
+  for (const pool of sfxPools.values()) {
+    for (const audio of pool) {
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Ignore buffered-state seeking failures.
+      }
+    }
+  }
+}
+
+function setBgmVolume(value: number): void {
+  state.bgmVolume = clampVolume(value);
+  if (bgmAudio) bgmAudio.volume = state.bgmVolume;
+  persistVolume(BGM_VOLUME_STORAGE_KEY, state.bgmVolume);
+  syncAudioControlLabels();
+}
+
+function setSfxVolume(value: number): void {
+  state.sfxVolume = clampVolume(value);
+  persistVolume(SFX_VOLUME_STORAGE_KEY, state.sfxVolume);
+  syncAudioControlLabels();
+}
+
+function syncAudioControlLabels(): void {
+  root.querySelectorAll<HTMLElement>("[data-bgm-volume-label]").forEach((element) => {
+    element.textContent = volumePercent(state.bgmVolume);
+  });
+  root.querySelectorAll<HTMLElement>("[data-sfx-volume-label]").forEach((element) => {
+    element.textContent = volumePercent(state.sfxVolume);
+  });
+}
+
+async function syncBgmPlayback(): Promise<void> {
+  if (!state.bgmEnabled) {
+    bgmAudio?.pause();
+    pauseAllSfx();
+    return;
+  }
+  const audio = ensureBgmAudio();
+  audio.volume = state.bgmVolume;
+  if (!audio.paused) return;
+  try {
+    await audio.play();
+  } catch {
+    // Browsers require a user gesture before playback; the next click will retry.
+  }
+}
+
+function toggleBgm(): void {
+  state.bgmEnabled = !state.bgmEnabled;
+  persistBgmEnabled();
+  if (!state.bgmEnabled) {
+    bgmAudio?.pause();
+    pauseAllSfx();
+  } else {
+    void syncBgmPlayback();
+    playSfx("uiClick", { volume: 0.35 });
+  }
+  render();
+}
 
 root.addEventListener("pointerdown", (event) => {
   const target = event.target as HTMLElement;
@@ -282,6 +471,9 @@ root.addEventListener("click", (event) => {
     | SubjectId
     | undefined;
 
+  if (state.bgmEnabled && action !== "toggle-bgm") {
+    void syncBgmPlayback();
+  }
   if (action && isExamToolAction(action)) {
     if (Date.now() < suppressNextToolClickUntil) return;
     if (handleExamToolAction(action)) return;
@@ -299,6 +491,7 @@ root.addEventListener("click", (event) => {
     return;
   }
   if (action === "skip-draft") {
+    playSfx("uiClick", { volume: 0.34 });
     state.choicePrompt?.resolve(-1);
     return;
   }
@@ -319,6 +512,7 @@ root.addEventListener("click", (event) => {
       syncNameReview();
       return;
     }
+    playSfx("uiClick", { volume: 0.38 });
     void restartRun(false);
     return;
   }
@@ -400,17 +594,39 @@ root.addEventListener("click", (event) => {
     return;
   }
   if (action === "continue-settlement") {
+    playSfx("uiClick", { volume: 0.36 });
     state.settlementContinue?.();
     return;
   }
 });
 
 function isExamToolAction(action: string): boolean {
-  return action === "toggle-auto" || action === "restart" || action === "cycle-speed" || action === "skip-to-settlement";
+  return (
+    action === "toggle-auto" ||
+    action === "restart" ||
+    action === "cycle-speed" ||
+    action === "skip-to-settlement" ||
+    action === "toggle-audio-panel" ||
+    action === "toggle-bgm"
+  );
 }
 
 function handleExamToolAction(action: string): boolean {
+  if (action !== "toggle-bgm" && action !== "toggle-audio-panel" && state.bgmEnabled) {
+    void syncBgmPlayback();
+  }
+  if (action === "toggle-audio-panel") {
+    state.audioPanelOpen = !state.audioPanelOpen;
+    playSfx("uiClick", { volume: 0.3 });
+    render();
+    return true;
+  }
+  if (action === "toggle-bgm") {
+    toggleBgm();
+    return true;
+  }
   if (action === "restart") {
+    playSfx("uiClick", { volume: 0.35 });
     if (state.phase === "exam" && state.activeExam) {
       openRestartConfirm();
     } else {
@@ -419,16 +635,19 @@ function handleExamToolAction(action: string): boolean {
     return true;
   }
   if (action === "toggle-auto") {
+    playSfx("uiClick", { volume: 0.32 });
     state.autoPlay = !state.autoPlay;
     wakePlaybackDelays();
     render();
     return true;
   }
   if (action === "cycle-speed") {
+    playSfx("uiClick", { volume: 0.32, playbackRate: 1.08 });
     cycleSpeedMultiplier();
     return true;
   }
   if (action === "skip-to-settlement") {
+    playSfx("uiClick", { volume: 0.38, playbackRate: 0.92 });
     if (state.phase === "exam" && state.activeExam && !state.examSettlement) {
       state.skipToSettlement = true;
       state.autoPlay = true;
@@ -469,6 +688,14 @@ root.addEventListener("input", (event) => {
   if (input.dataset.field === "feedback-contact") {
     state.feedback = { ...state.feedback, contact: input.value, status: "idle", error: undefined };
     syncFeedbackControls();
+    return;
+  }
+  if (input.dataset.field === "bgm-volume") {
+    setBgmVolume(Number(input.value) / 100);
+    return;
+  }
+  if (input.dataset.field === "sfx-volume") {
+    setSfxVolume(Number(input.value) / 100);
     return;
   }
 });
@@ -544,7 +771,7 @@ function render(): void {
   root.innerHTML = `
     <div class="app-shell phase-${state.phase} fx-${intensity} kind-${cssSafeKind(activeKind)} ${state.activeTrigger ? "chain-live" : ""} ${pausedClass}">
       <main class="paper-field">${renderPhase()}</main>
-      ${state.phase === "exam" && state.activeExam ? renderExamToolDock() : ""}
+      ${state.phase === "exam" && state.activeExam ? renderExamToolDock() : renderAudioDock()}
       ${renderScoreChoicePrompt()}
       ${renderRestartConfirm()}
       ${renderCopyToast()}
@@ -728,7 +955,7 @@ function renderStart(): string {
         <section class="start-panel answer-card-panel">
           <div class="answer-card-title">
             <p class="mono-label">ADMISSION CARD</p>
-            <h1>请选择你的高考遗物</h1>
+            <h1>请选择你的高考藏品</h1>
           </div>
           <div class="answer-card-sheet" aria-label="答题卡开局设置">
             <div class="sheet-secret-line">姓名、准考证号填写处</div>
@@ -768,11 +995,11 @@ function renderLoading(): string {
 }
 
 function renderDraft(prompt: ChoicePrompt): string {
-  const opening = !prompt.discard && state.exams.length === 0 && !state.activeExam && prompt.reason === "开局遗物";
+  const opening = !prompt.discard && state.exams.length === 0 && !state.activeExam && prompt.reason === "开局藏品";
   const rollIndex = Math.min(6, prompt.sequence);
   const selected = state.subjects;
   const modeLabel = prompt.discard ? "OVERFLOW ARCHIVE" : opening ? `OPENING ROLL ${rollIndex}/6` : "NEXT SUBJECT ROLL";
-  const title = prompt.discard ? "遗物已达上限" : opening ? `请选择你的遗物 ${rollIndex}/6` : "请选择你的遗物";
+  const title = prompt.discard ? "藏品已达上限" : opening ? `请选择你的藏品 ${rollIndex}/6` : "请选择你的藏品";
   const statusItems = [
     ["候选", `${prompt.choices.length}`],
     ["已持有", `${state.artifacts.length}`],
@@ -785,16 +1012,16 @@ function renderDraft(prompt: ChoicePrompt): string {
           <p class="mono-label">${modeLabel}</p>
           <h1>${title}</h1>
         </div>
-        <div class="draft-status-rail" aria-label="遗物抽取状态">
+        <div class="draft-status-rail" aria-label="藏品抽取状态">
           ${statusItems.map(([label, value]) => `<span><small>${label}</small><strong>${value}</strong></span>`).join("")}
         </div>
-        ${prompt.discard ? "<p>选择一件遗物丢弃，为新遗物腾出位置。</p>" : ""}
+        ${prompt.discard ? "<p>选择一件藏品丢弃，为新藏品腾出位置。</p>" : ""}
         ${opening ? renderTicketProfile(selected) : ""}
       </div>
       <div class="draft-grid">
         ${prompt.choices.map((artifact, index) => renderDraftCard(artifact, index, prompt.discard)).join("")}
       </div>
-      ${prompt.discard ? "" : `<button class="secondary-button skip-draft-button" type="button" data-action="skip-draft">跳过，不拿遗物</button>`}
+      ${prompt.discard ? "" : `<button class="secondary-button skip-draft-button" type="button" data-action="skip-draft">跳过，不拿藏品</button>`}
       ${renderExistingBuild()}
     </section>
   `;
@@ -876,7 +1103,7 @@ function renderDebugBuilder(): string {
       <div class="debug-head">
         <div>
           <p class="mono-label">DEBUG BUILD</p>
-          <h2>任意构筑遗物组</h2>
+          <h2>任意构筑藏品组</h2>
         </div>
         <button class="secondary-button" type="button" data-action="clear-debug-build">清空</button>
       </div>
@@ -893,11 +1120,11 @@ function renderDebugBuilder(): string {
                   `
                 )
                 .join("")
-            : `<span class="debug-empty">未放入遗物；开始考试将以空构筑进入考试。</span>`
+            : `<span class="debug-empty">未放入藏品；开始考试将以空构筑进入考试。</span>`
         }
       </div>
       <label class="debug-search">
-        <span>搜索遗物</span>
+        <span>搜索藏品</span>
         <input
           data-field="debug-search"
           value="${escapeAttr(state.debugSearchInput)}"
@@ -911,7 +1138,7 @@ function renderDebugBuilder(): string {
         ${
           results.length
             ? results.map((artifact) => renderDebugArtifactOption(artifact)).join("")
-            : `<div class="debug-empty">没有匹配的遗物。</div>`
+            : `<div class="debug-empty">没有匹配的藏品。</div>`
         }
       </div>
     </div>
@@ -1155,10 +1382,6 @@ function renderExamHeader(exam: NonNullable<UiState["activeExam"]>, pending: num
   return `
     <div class="exam-paper-header compact-paper-header">
       <span class="secret-line">★ 考试状态 ★</span>
-      <div class="paper-id-pattern" aria-hidden="true">
-        <span>准考证号 ${escapeHtml(state.seed.slice(0, 10).toUpperCase())}</span>
-        <i></i>
-      </div>
       <div class="paper-status-layout" aria-label="当前考试状态">
         <div class="paper-title-block compact-paper-title">
           <p class="mono-label">AUTO EXAM STATUS</p>
@@ -1206,7 +1429,60 @@ function renderExamToolDock(): string {
       <button class="exam-icon-button is-skip" type="button" data-action="skip-to-settlement" aria-label="跳到改分或本科结算" title="跳到改分或本科结算">
         <span class="geo-icon geo-skip" aria-hidden="true"></span>
       </button>
+      ${renderBgmButton()}
+      ${renderAudioPanel()}
     </div>
+  `;
+}
+
+function renderAudioDock(): string {
+  return `
+    <div class="audio-control-dock" aria-label="音频控制">
+      ${renderBgmButton()}
+      ${renderAudioPanel()}
+    </div>
+  `;
+}
+
+function renderBgmButton(): string {
+  const label = "音量设置";
+  return `
+    <button class="exam-icon-button is-bgm ${state.bgmEnabled ? "is-bgm-on" : "is-bgm-off"}" type="button" data-action="toggle-audio-panel" aria-label="${label}" title="${label}" aria-expanded="${state.audioPanelOpen ? "true" : "false"}">
+      ${renderBgmIcon(state.bgmEnabled)}
+    </button>
+  `;
+}
+
+function renderAudioPanel(): string {
+  if (!state.audioPanelOpen) return "";
+  const toggleLabel = state.bgmEnabled ? "关闭音频" : "开启音频";
+  return `
+    <div class="audio-volume-panel" role="group" aria-label="音量调节">
+      <div class="audio-volume-head">
+        <span>音量</span>
+        <button class="audio-toggle-pill ${state.bgmEnabled ? "is-on" : "is-off"}" type="button" data-action="toggle-bgm">
+          ${toggleLabel}
+        </button>
+      </div>
+      <label class="audio-slider-row">
+        <span>BGM <strong data-bgm-volume-label>${volumePercent(state.bgmVolume)}</strong></span>
+        <input type="range" min="0" max="100" step="1" value="${Math.round(state.bgmVolume * 100)}" data-field="bgm-volume" aria-label="BGM 音量" />
+      </label>
+      <label class="audio-slider-row">
+        <span>音效 <strong data-sfx-volume-label>${volumePercent(state.sfxVolume)}</strong></span>
+        <input type="range" min="0" max="100" step="1" value="${Math.round(state.sfxVolume * 100)}" data-field="sfx-volume" aria-label="音效音量" />
+      </label>
+    </div>
+  `;
+}
+
+function renderBgmIcon(enabled: boolean): string {
+  return `
+    <svg class="bgm-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M3 8.2h3.1l3.8-3.1c.5-.4 1.2-.1 1.2.6v8.6c0 .7-.8 1-1.2.6l-3.8-3.1H3a1 1 0 0 1-1-1V9.2a1 1 0 0 1 1-1Z"/>
+      <path class="bgm-wave" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7" d="M13.6 7.1c1.1 1.5 1.1 4.3 0 5.8M15.9 5.4c2.2 2.5 2.2 6.7 0 9.2"/>
+      ${enabled ? "" : `<path class="bgm-slash" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M4 4l12 12"/>`}
+    </svg>
   `;
 }
 
@@ -1394,10 +1670,10 @@ function renderStateDrawer(exam: NonNullable<UiState["activeExam"]>, pending: nu
 function renderTermsDrawer(): string {
   return `
     <details class="mobile-drawer terms-drawer" data-drawer="terms" ${drawerOpenAttr("terms")}>
-      <summary><span>遗物列表</span><strong>${state.artifacts.length} 条</strong></summary>
+      <summary><span>藏品列表</span><strong>${state.artifacts.length} 条</strong></summary>
       <div class="panel-title">
         <p class="mono-label">ADMISSION TICKET</p>
-        <h2>遗物列表</h2>
+        <h2>藏品列表</h2>
       </div>
       <div class="term-list">
         ${state.artifacts.map((artifact) => renderTermCard(artifact)).join("")}
@@ -1435,7 +1711,7 @@ function renderHelpDoc(): string {
     <div class="help-doc">
       <section>
         <h3>开局</h3>
-        <p>先进行 6 次开局 4 选 1 遗物，再完成语文、数学、英语和 3 门自选科目的 6 场考试。</p>
+        <p>先进行 6 次开局 4 选 1 藏品，再完成语文、数学、英语和 3 门自选科目的 6 场考试。</p>
       </section>
       <section>
         <h3>题目</h3>
@@ -1443,7 +1719,7 @@ function renderHelpDoc(): string {
       </section>
       <section>
         <h3>正确率</h3>
-        <p>判题时先算最终正确率 = 基础正确率 x 当前体力 / 100 + 本题正确率加成，再被相关遗物修正；超过 100% 的部分可被部分遗物转换成倍率收益。</p>
+        <p>判题时先算最终正确率 = 基础正确率 x 当前体力 / 100 + 本题正确率加成，再被相关藏品修正；超过 100% 的部分可被部分藏品转换成倍率收益。</p>
       </section>
       <section>
         <h3>体力与倍率</h3>
@@ -1451,7 +1727,7 @@ function renderHelpDoc(): string {
       </section>
       <section>
         <h3>无尽模式</h3>
-        <p>分数超过 750 可进入无尽模式。之后每年保留遗物，每科前获得一次 4 选 1，录取线每年 x100。</p>
+        <p>分数超过 750 可进入无尽模式。之后每年保留藏品，每科前获得一次 4 选 1，录取线每年 x100。</p>
       </section>
       <section>
         <h3>操作</h3>
@@ -1486,7 +1762,7 @@ function renderLogStandalone(): string {
 }
 
 function logTone(line: string): "good" | "warn" | "wild" {
-  if (line.startsWith("触发遗物") || line.startsWith("获得遗物")) return "good";
+  if (line.startsWith("触发藏品") || line.startsWith("获得藏品")) return "good";
   if (line.includes("失去") || line.includes("错误") || line.includes("丢弃")) return "warn";
   return "wild";
 }
@@ -1513,13 +1789,13 @@ function renderResult(result: RunResult): string {
         </div>
         ${renderShareCard(result, title)}
         <div class="result-lower-summary">
-          <p>${escapeHtml(publicPlayerName())} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件遗物。</p>
+          <p>${escapeHtml(publicPlayerName())} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件藏品。</p>
           <div class="endless-panel ${passedThreshold ? "passed" : "failed"}">
             <div>
               <span>${passedThreshold ? "下一年录取线" : "本轮录取线"}</span>
               <strong>${passedThreshold ? nextThresholdText : thresholdText}</strong>
             </div>
-            <p>${passedThreshold ? "进入下一年后保留当前遗物组；每科开考前获得一次 4 选 1。" : "达到本轮录取线后可进入下一年。"}</p>
+            <p>${passedThreshold ? "进入下一年后保留当前藏品组；每科开考前获得一次 4 选 1。" : "达到本轮录取线后可进入下一年。"}</p>
           </div>
         </div>
         ${renderResultArtifacts(result)}
@@ -1582,9 +1858,9 @@ function renderShareCard(result: RunResult, title: string): string {
 function renderResultArtifacts(result: RunResult): string {
   if (result.artifactNames.length === 0) return "";
   return `
-    <section class="result-artifacts" aria-label="最终遗物清单">
+    <section class="result-artifacts" aria-label="最终藏品清单">
       <div class="result-artifacts-head">
-        <span>遗物清单</span>
+        <span>藏品清单</span>
         <strong>${result.artifactNames.length} 条</strong>
       </div>
       <div class="result-artifact-list">
@@ -1784,7 +2060,7 @@ function renderScoreAdjustmentRow(adjustment: number, variant: "result" | "share
 }
 
 function scoreAdjustmentLabel(adjustment: number): string {
-  return adjustment >= 0 ? "遗物总分加成" : "遗物总分修正";
+  return adjustment >= 0 ? "藏品总分加成" : "藏品总分修正";
 }
 
 function resultScoreAdjustment(result: RunResult): number {
@@ -1802,7 +2078,7 @@ function renderSharedReport(report: SharedReport): string {
         <p class="mono-label">SHARED REPORT</p>
         <div class="final-score ${report.score > 750 ? "over-score" : ""}">${scoreText}</div>
         <h1>${escapeHtml(resultTitle(report.score))}</h1>
-        <p>${escapeHtml(report.playerName)} 的分享战报。第 ${report.year} 年，收录 ${report.artifacts.length} 件遗物。</p>
+        <p>${escapeHtml(report.playerName)} 的分享战报。第 ${report.year} 年，收录 ${report.artifacts.length} 件藏品。</p>
         <section class="share-card-preview" aria-label="分享战报">
           <div class="share-card-paper">
             <div class="share-card-head">
@@ -1883,7 +2159,7 @@ async function oneTapShare(): Promise<void> {
   }
   try {
     const shareData: ShareData = {
-      title: "请选择你的高考遗物",
+      title: "请选择你的高考藏品",
       text,
       url: link
     };
@@ -1934,9 +2210,9 @@ async function copyLeaderboardShare(): Promise<void> {
 function buildShareText(result: RunResult, link: string, rank?: number): string {
   const playerName = publicPlayerName();
   if (rank) {
-    return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，当前榜单第${rank}名：${link}`;
+    return `${playerName}在《请选择你的高考藏品》中获得了${formatNumber(result.totalScore)}分，当前榜单第${rank}名：${link}`;
   }
-  return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，你也来试试吧：${link}`;
+  return `${playerName}在《请选择你的高考藏品》中获得了${formatNumber(result.totalScore)}分，你也来试试吧：${link}`;
 }
 
 function publicPlayerName(): string {
@@ -2191,7 +2467,7 @@ function drawReportCanvas(
   y += Math.ceil(scoreRows.length / 3) * 76 + 44;
   context.font = "900 24px 'Microsoft YaHei', sans-serif";
   context.fillStyle = "#111827";
-  context.fillText(`遗物清单 ${result.artifactNames.length} 件`, 112, y);
+  context.fillText(`藏品清单 ${result.artifactNames.length} 件`, 112, y);
   y += 28;
   result.artifactNames.forEach((name, index) => {
     const x = 112 + (index % 3) * 296;
@@ -3085,7 +3361,7 @@ function recordScoreDecision(
 function createRunHooks(runId: number): ChoiceHooks {
   return {
     chooseArtifact: (choices, reason) => promptChoice(runId, choices, reason, false),
-    chooseDiscard: (owned) => promptChoice(runId, owned, "遗物已达上限", true),
+    chooseDiscard: (owned) => promptChoice(runId, owned, "藏品已达上限", true),
     onLog: (line) => {
       if (!isCurrentRun(runId)) return;
       state.logs = [...state.logs, line];
@@ -3165,6 +3441,7 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.scoreAdjustment = exam.currentTotalAdjustment;
       if (state.skipToSettlement) return;
       if (!hasBankingScore && !question.correct) {
+        playSfx("failError", { volume: 0.42, minIntervalMs: 90 });
         state.scoreFlash = undefined;
         render();
         await playbackDelay(runId, scoreCollectDelayMs());
@@ -3184,6 +3461,7 @@ function createRunHooks(runId: number): ChoiceHooks {
         examScoreAfter,
         scoreBanking: hasBankingScore
       };
+      playQuestionSfx(question, visualEvent);
       state.scoreFlash = visualEvent;
       state.visualEvents = [visualEvent, ...state.visualEvents].slice(0, 12);
       render();
@@ -3211,6 +3489,7 @@ function createRunHooks(runId: number): ChoiceHooks {
       state.examSettlement = exam;
       state.skipToSettlement = false;
       restoreDefaultSpeed();
+      playSettlementSfx(exam);
       render();
       await waitForExamSettlement(runId);
       if (!isCurrentRun(runId)) return;
@@ -3257,6 +3536,10 @@ function promptChoice(
       discard,
       sequence,
       resolve: (index) => {
+        playSfx(index >= 0 ? "draftSelect" : "uiClick", {
+          volume: index >= 0 ? 0.52 : 0.34,
+          playbackRate: discard ? 0.9 : 1
+        });
         recordArtifactDecision(choices, reason, discard, index);
         trackEvent(discard ? "artifact_discarded" : "artifact_selected", {
           reason,
@@ -3311,9 +3594,11 @@ function promptScoreChoice(
 ): Promise<number | [number, number] | undefined> {
   if (!isCurrentRun(runId)) return Promise.resolve(undefined);
   return new Promise((resolve) => {
+    playSfx("popupQuestion", { volume: 0.46, minIntervalMs: 120 });
     state.scoreChoicePrompt = {
       ...prompt,
       resolve: (value) => {
+        playSfx("uiClick", { volume: 0.36 });
         recordScoreDecision(prompt, value);
         trackEvent("score_choice", {
           mode: prompt.mode,
@@ -3344,11 +3629,13 @@ function resolveScorePosition(index: number): void {
   const digits = scoreDigits(prompt.score);
   if (!Number.isInteger(index) || index < 0 || index >= digits.length) return;
   if (prompt.selectedPosition === undefined) {
+    playSfx("uiClick", { volume: 0.32 });
     state.scoreChoicePrompt = { ...prompt, selectedPosition: index };
     render();
     return;
   }
   if (prompt.selectedPosition === index) {
+    playSfx("uiClick", { volume: 0.3, playbackRate: 0.92 });
     state.scoreChoicePrompt = { ...prompt, selectedPosition: undefined };
     render();
     return;
@@ -3365,6 +3652,7 @@ function skipScoreSwap(): void {
 function resetScoreSwap(): void {
   const prompt = state.scoreChoicePrompt;
   if (!prompt || prompt.mode !== "digitSwap") return;
+  playSfx("uiClick", { volume: 0.28, playbackRate: 0.9 });
   state.scoreChoicePrompt = { ...prompt, selectedPosition: undefined };
   render();
 }
@@ -3410,6 +3698,54 @@ function waitForExamSettlement(runId: number): Promise<void> {
   });
 }
 
+function playQuestionSfx(question: QuestionLog, visualEvent: VisualEvent): void {
+  const scoreDelta = Math.abs(visualEvent.scoreDelta ?? 0);
+  if (!question.correct && scoreDelta < 0.0001) {
+    playSfx("failError", { volume: 0.42, minIntervalMs: 90 });
+    return;
+  }
+  if (visualEvent.intensity === "jackpot" || scoreDelta >= 90) {
+    playSfx("chainJackpot", { volume: 0.58, minIntervalMs: 160 });
+    return;
+  }
+  if (visualEvent.intensity === "high" || scoreDelta >= 30) {
+    playSfx("scoreBonus", { volume: 0.54, minIntervalMs: 90 });
+    return;
+  }
+  playSfx("scoreTick", { volume: 0.42, playbackRate: question.correct ? 1.05 : 0.92, minIntervalMs: 45 });
+}
+
+function playSettlementSfx(exam: ExamLog): void {
+  const fullScore = SUBJECT_EXAM_RULES[exam.subject].fullScore;
+  if (exam.score > fullScore * 1.5) {
+    playSfx("chainJackpot", { volume: 0.62, minIntervalMs: 240 });
+    return;
+  }
+  playSfx("scoreBonus", { volume: 0.58, playbackRate: exam.score >= fullScore ? 1.08 : 1, minIntervalMs: 180 });
+}
+
+function playTriggerSfx(event: TriggerEvent, visualEvent: VisualEvent): void {
+  const artifact = findArtifact(event.artifactId);
+  const scoreDelta = Math.abs(visualEvent.scoreDelta ?? 0);
+  if (visualEvent.intensity === "jackpot" || scoreDelta >= 120) {
+    playSfx("chainJackpot", { volume: 0.6, minIntervalMs: 160 });
+    return;
+  }
+  if (event.timing === "OTHER_ARTIFACT_TRIGGERED" || event.replay || state.chainCount >= 3) {
+    playSfx("chainGlitch", { volume: 0.48, playbackRate: event.replay ? 1.12 : 1, minIntervalMs: 80 });
+    return;
+  }
+  if (artifact?.rarity === "special") {
+    playSfx("legendaryTrigger", { volume: 0.58, minIntervalMs: 120 });
+    return;
+  }
+  if (artifact?.rarity === "rare" || artifact?.rarity === "uncommon") {
+    playSfx("rareTrigger", { volume: 0.52, minIntervalMs: 90 });
+    return;
+  }
+  playSfx("artifactTrigger", { volume: 0.46, minIntervalMs: 60 });
+}
+
 async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<void> {
   if (state.skipToSettlement) {
     state.liveStatus = event.after;
@@ -3435,6 +3771,7 @@ async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<voi
   }
   state.scoreAdjustment = event.scoreAfter.currentTotalAdjustment;
   state.visualEvents = [visualEvent, ...state.visualEvents].slice(0, 12);
+  playTriggerSfx(event, visualEvent);
   render();
   const triggerDelay = triggerDelayMs(event.timing);
   if (triggerDelay > 0) {
@@ -3574,8 +3911,8 @@ function roundDelta(value: number): number {
 }
 
 function recordVisualEvent(line: string): void {
-  const triggerPrefix = "触发遗物: ";
-  const gainPrefix = "获得遗物: ";
+  const triggerPrefix = "触发藏品: ";
+  const gainPrefix = "获得藏品: ";
   if (line.startsWith(triggerPrefix)) {
     return;
   }

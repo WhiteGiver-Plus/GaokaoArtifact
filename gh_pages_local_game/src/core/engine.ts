@@ -57,13 +57,13 @@ export async function runGame(
     }
   } else {
     for (let i = 0; i < (options.openingDrafts ?? 6); i += 1) {
-      await draftArtifact(state, hooks, options, 4, "开局遗物");
+      await draftArtifact(state, hooks, options, 4, "开局藏品");
     }
   }
 
   for (let i = 0; i < subjects.length; i += 1) {
     if (options.preExamDrafts) {
-      await draftArtifact(state, hooks, options, 4, `第 ${year} 年考前遗物`);
+      await draftArtifact(state, hooks, options, 4, `第 ${year} 年考前藏品`);
     }
     await runExam(state, subjects[i], i, hooks, options);
     if (options.postExamDrafts ?? true) {
@@ -161,7 +161,7 @@ async function draftArtifact(
   state.stats.nextDraftChoicesBonus = 0;
   const choices = createDraftChoices(state, choiceCount);
   if (choices.length === 0) {
-    appendLog(state, `${reason}: 遗物池已空。`);
+    appendLog(state, `${reason}: 藏品池已空。`);
     return;
   }
   const pickedIndex = await chooseArtifactIndex(choices, reason, hooks, options, state);
@@ -286,7 +286,7 @@ async function gainArtifact(
   try {
     const owned = createOwnedArtifact(state, artifactId);
     state.artifacts.push(owned);
-    appendLog(state, `获得遗物: ${config.name}`);
+    appendLog(state, `获得藏品: ${config.name}`);
     state.currentEventCount = 0;
     await triggerOwnedArtifact(state, owned, "ARTIFACT_GAINED", undefined, hooks, options);
     emitArtifactsChanged(state, hooks);
@@ -308,7 +308,7 @@ async function enforceArtifactLimit(
     while (state.artifacts.length > queryModifierValue(state, "artifactLimit", state.stats.artifactLimit)) {
       if (state.stats.preventDiscardCharges > 0) {
         state.stats.preventDiscardCharges -= 1;
-        appendLog(state, "遗物上限超出，但本次丢弃被免除。");
+        appendLog(state, "藏品上限超出，但本次丢弃被免除。");
         return;
       }
       const configs = state.artifacts.map((owned) => state.artifactById.get(owned.artifactId)!);
@@ -340,7 +340,7 @@ async function loseArtifactAt(
     return;
   }
   const config = state.artifactById.get(owned.artifactId);
-  appendLog(state, `失去遗物: ${config?.name ?? owned.artifactId}`);
+  appendLog(state, `失去藏品: ${config?.name ?? owned.artifactId}`);
   state.currentEventCount = 0;
   await triggerOwnedArtifact(state, owned, "ARTIFACT_LOST", undefined, hooks, options, owned);
   for (const listener of [...state.artifacts]) {
@@ -440,7 +440,7 @@ async function executeTrigger(
   options: GameOptions
 ): Promise<boolean> {
   if (state.currentEventCount >= EVENT_TRIGGER_LIMIT) {
-    appendLog(state, "本次结算触发次数达到 20，后续遗物触发被跳过。");
+    appendLog(state, "本次结算触发次数达到 20，后续藏品触发被跳过。");
     return false;
   }
   if (!evaluateCondition(context.trigger.condition, state, {
@@ -497,7 +497,7 @@ async function executeTrigger(
   const artifactNameText = config?.name ?? context.owner.artifactId;
   appendLog(
     state,
-    `触发遗物: ${artifactNameText}${effectText ? ` -> ${effectText}` : ""}`
+    `触发藏品: ${artifactNameText}${effectText ? ` -> ${effectText}` : ""}`
   );
   await hooks.onTrigger?.({
     artifactId: context.owner.artifactId,
@@ -570,15 +570,15 @@ function describeEffect(effect: EffectConfig): string {
     case "queueQuestionModifier":
       return `后续 ${effect.duration} 题${effect.target === "accuracy" ? "正确率" : "倍率"} ${formatSigned(effect.value)}`;
     case "gainRandomArtifacts":
-      return `随机获得 ${effect.count} 个遗物`;
+      return `随机获得 ${effect.count} 个藏品`;
     case "offerDraft":
       return `额外 ${effect.choices} 选 ${effect.picks}`;
     case "destroySelf":
       return "销毁自身";
     case "destroyOther":
-      return "销毁其他遗物";
+      return "销毁其他藏品";
     case "destroyAllOtherAndMultiplyCurrentTotal":
-      return `销毁其他遗物，每张当前总分 x${effect.factorPerDestroyed}`;
+      return `销毁其他藏品，每张当前总分 x${effect.factorPerDestroyed}`;
     case "maximizeOnesDigit":
       return "将个位改成最优数字";
     case "maximizeDigitSwap":
@@ -600,7 +600,7 @@ function statLabel(stat: Extract<EffectConfig, { op: "addStat" }>["stat"] | "sta
     stamina: "体力",
     staminaDecay: "体力下降",
     staminaFloor: "体力下限",
-    artifactLimit: "遗物上限",
+    artifactLimit: "藏品上限",
     draftChoicesBonus: "抽取备选数",
     nextDraftChoicesBonus: "下次抽取备选数",
     questionMultiplierBase: "常驻本题倍率"

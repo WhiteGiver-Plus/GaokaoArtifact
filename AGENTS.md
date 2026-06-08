@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repository contains a browser game named `请选择你的高考遗物`. Keep player-facing docs concise and keep implementation/deployment detail here.
+This repository contains a browser game named `请选择你的高考藏品`. Keep player-facing docs concise and keep implementation/deployment detail here.
 
 ## Project Shape
 
