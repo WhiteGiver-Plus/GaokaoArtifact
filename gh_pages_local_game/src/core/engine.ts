@@ -105,12 +105,17 @@ function applyCarryoverStats(state: GameState, carryoverStats?: Partial<GameStat
   if (!carryoverStats) {
     return;
   }
+  const previousLuckyBlockMultiplier = carryoverStats.luckyBlockValueMultiplier ?? 1;
   state.stats = {
     ...state.stats,
     ...carryoverStats,
-    currentTotalAdjustment: 0
+    currentTotalAdjustment: 0,
+    luckyBlockValueMultiplier: 1
   };
   state.stats.stamina = Math.max(state.stats.staminaFloor, state.stats.stamina);
+  if (previousLuckyBlockMultiplier > 1) {
+    appendLog(state, "幸运方块触发次数已按年度重置。");
+  }
 }
 
 function captureCarryoverStats(state: GameState): GameState["stats"] {

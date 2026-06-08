@@ -1280,7 +1280,7 @@ function renderTriggerOverlay(): string {
     : "";
   return `
     <div class="trigger-overlay" aria-hidden="true">
-      <span class="float-event float-${event.tone} float-${event.intensity} kind-${cssSafeKind(event.kind)} ${event.scoreBanking ? "float-banking" : ""} ${event.settling ? "float-settling" : ""}">
+      <span class="float-event float-${event.tone} float-${event.intensity} kind-${cssSafeKind(event.kind)} artifact-${cssSafeKind(event.artifactId ?? "unknown")} ${event.scoreBanking ? "float-banking" : ""} ${event.settling ? "float-settling" : ""}">
         <strong>${escapeHtml(label)}</strong>
         ${detail ? `<small>${detail}</small>` : ""}
         ${ledger}
@@ -3396,6 +3396,9 @@ async function settleScoreFlash(runId: number, visualEvent: VisualEvent): Promis
 
 function triggerEventToVisual(event: TriggerEvent): VisualEvent {
   const scoreDelta = roundDelta(event.scoreAfter.currentTotal - event.scoreBefore.currentTotal);
+  const luckyBlockBonus = event.artifactId === "lucky_block"
+    ? roundDelta(event.scoreAfter.examPostBonus - event.scoreBefore.examPostBonus)
+    : 0;
   return {
     id: `${Date.now()}-${event.slotIndex}-${event.triggerIndex}-${state.visualEvents.length}`,
     label: event.artifactName,
@@ -3404,6 +3407,7 @@ function triggerEventToVisual(event: TriggerEvent): VisualEvent {
     intensity: triggerIntensity(event, state.chainCount + 1),
     artifactId: event.artifactId,
     effectText: event.effectText,
+    detailText: luckyBlockBonus ? `${formatDelta(luckyBlockBonus)} 分` : undefined,
     deltas: diffStatus(event.before, event.after),
     scoreDelta,
     scoreBefore: event.scoreBefore.currentTotal,
@@ -3588,8 +3592,8 @@ function multiplierHeat(value: number): "cool" | "warm" | "hot" | "overdrive" {
   return "cool";
 }
 
-function cssSafeKind(kind: VisualEventKind): string {
-  return kind.replace(":", "-");
+function cssSafeKind(kind: string): string {
+  return kind.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
 }
 
 function readPlayerName(): string {
