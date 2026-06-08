@@ -122,7 +122,8 @@ function captureCarryoverStats(state: GameState): GameState["stats"] {
   return {
     ...state.stats,
     stamina: Math.max(state.stats.staminaFloor, state.stats.baseStamina),
-    currentTotalAdjustment: 0
+    currentTotalAdjustment: 0,
+    luckyBlockValueMultiplier: 1
   };
 }
 
