@@ -1076,7 +1076,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "tesseract",
-    "name": "宇宙立方",
+    "name": "三次元差不多得了",
     "rarity": "uncommon",
     "tags": [
       "分数形态",
@@ -1103,7 +1103,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "weeb_square",
-    "name": "唉，二次元",
+    "name": "二次元差不多得了",
     "rarity": "common",
     "tags": [
       "分数形态",
@@ -1343,7 +1343,7 @@ export const LOCAL_ARTIFACTS = [
   },
   {
     "id": "math_lover",
-    "name": "数学爱好者",
+    "name": "2",
     "rarity": "rare",
     "tags": [
       "分数形态",

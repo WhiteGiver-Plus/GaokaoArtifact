@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gaokao-artifact",
+  "account_id": "cd09ad76072f46abf31da53a618726db",
+  "compatibility_date": "2025-01-01",
+  "pages_build_output_dir": "./gh_pages_local_game/dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gaokao-artifact-stats",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

@@ -1,18 +1,18 @@
-import { LOCAL_ARTIFACTS } from "../../gh_pages_local_game/src/artifacts.generated.js";
+import { LOCAL_ARTIFACTS } from "../../../gh_pages_local_game/src/artifacts.generated.js";
 import {
   runGame,
   type ArtifactConfig,
   type GameOptions,
   type RunResult,
   type SubjectId
-} from "../../gh_pages_local_game/src/core/browser.js";
+} from "../../../gh_pages_local_game/src/core/browser.js";
 import type {
   ArtifactDecisionEntry,
   DecisionTrace,
   DecisionTraceEntry,
   DecisionTraceRun,
   ScoreDecisionEntry
-} from "../../gh_pages_local_game/src/core/trace.js";
+} from "../../../gh_pages_local_game/src/core/trace.js";
 
 export async function replayDecisionTrace(trace: DecisionTrace): Promise<RunResult> {
   if (!trace || trace.version !== 1 || !Array.isArray(trace.runs) || trace.runs.length === 0) {
@@ -114,6 +114,7 @@ function consumeArtifactDecision(
 ): number {
   if (entry.kind !== "artifact") throw new Error("trace_kind_mismatch");
   const artifactEntry = entry as ArtifactDecisionEntry;
+  void reason;
   if (artifactEntry.discard !== discard) {
     throw new Error("artifact_context_mismatch");
   }

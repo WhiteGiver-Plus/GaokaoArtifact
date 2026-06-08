@@ -31,7 +31,7 @@
       "高正确率",
       "节奏题"
     ],
-    "description": "每场考试每 5 道题，正确率 +200%。",
+    "description": "每场考试每第 5 道题，正确率 +200%。",
     "triggers": [
       {
         "timing": "QUESTION_BEFORE_ROLL",
@@ -463,7 +463,7 @@
       "体力",
       "续航"
     ],
-    "description": "每场考试每 5 道题结束时，体力 +20。",
+    "description": "每场考试每第 5 道题结束时，体力 +20。",
     "triggers": [
       {
         "timing": "QUESTION_END",
@@ -962,7 +962,7 @@
   },
   {
     "id": "tesseract",
-    "name": "宇宙立方",
+    "name": "三次元差不多得了",
     "rarity": "uncommon",
     "tags": [
       "分数形态",
@@ -986,7 +986,7 @@
   },
   {
     "id": "weeb_square",
-    "name": "唉，二次元",
+    "name": "二次元差不多得了",
     "rarity": "common",
     "tags": [
       "分数形态",
@@ -1085,7 +1085,7 @@
       "节奏题",
       "倍率成长"
     ],
-    "description": "每场考试每 3 道题，正确率 x1.5，得分倍率 x2。",
+    "description": "每场考试每第 3 道题，正确率 x1.5，得分倍率 x2。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -1124,7 +1124,7 @@
       "节奏题",
       "倍率成长"
     ],
-    "description": "每场考试每 10 道题，正确率 x2，得分倍率 x5。",
+    "description": "每场考试每第 10 道题，正确率 x2，得分倍率 x5。",
     "modifiers": [
       {
         "target": "finalAccuracy",
@@ -1206,7 +1206,7 @@
   },
   {
     "id": "math_lover",
-    "name": "数学爱好者",
+    "name": "2",
     "rarity": "rare",
     "tags": [
       "分数形态",

@@ -7,7 +7,10 @@ import { defineConfig } from "vite";
 const configDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(configDir, "..");
 const packageJson = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8")) as { version?: string };
-const commit = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) || readGitCommit();
+const commit =
+  process.env.CF_PAGES_COMMIT_SHA?.slice(0, 12) ||
+  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ||
+  readGitCommit();
 const buildTime = process.env.BUILD_TIME || new Date().toISOString();
 
 export default defineConfig({

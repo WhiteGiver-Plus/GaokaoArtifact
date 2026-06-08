@@ -3300,6 +3300,10 @@ async function playTriggerEvent(runId: number, event: TriggerEvent): Promise<voi
   }
   if (!isCurrentRun(runId)) return;
   state.triggerQueue = state.triggerQueue.filter((item) => item.id !== visualEvent.id);
+  if (state.activeTrigger?.id === visualEvent.id) {
+    state.activeTrigger = undefined;
+    render();
+  }
 }
 
 function visibleTriggerExamScore(event: TriggerEvent): number {

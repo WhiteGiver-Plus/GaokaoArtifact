@@ -1,5 +1,0 @@
-{
-  "buildCommand": "npm run game:build",
-  "outputDirectory": "gh_pages_local_game/dist",
-  "installCommand": "npm install"
-}

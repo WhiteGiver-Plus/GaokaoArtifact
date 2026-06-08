@@ -8,18 +8,22 @@
     "game:dev": "npm run game:data --silent && vite --config gh_pages_local_game/vite.config.ts",
     "game:build": "npm run game:data --silent && vite build --config gh_pages_local_game/vite.config.ts",
     "game:preview": "vite preview --config gh_pages_local_game/vite.config.ts",
+    "cf:build": "npm run game:build",
+    "cf:dev": "npm run cf:build --silent && wrangler pages dev gh_pages_local_game/dist",
+    "cf:d1:local": "wrangler d1 migrations apply gaokao-artifact-stats --local",
+    "cf:d1:remote": "wrangler d1 migrations apply gaokao-artifact-stats --remote",
+    "cf:deploy": "npm run cf:build --silent && wrangler pages deploy gh_pages_local_game/dist --project-name gaokao-artifact",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.6",
-    "@vercel/node": "^5.8.12",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "wrangler": "^4.98.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.107.0",
     "html-to-image": "^1.11.13",
     "qrcode": "^1.5.4"
   }

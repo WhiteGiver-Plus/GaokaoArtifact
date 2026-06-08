@@ -6,6 +6,7 @@ coverage/
 .env.*
 !.env.example
 .vercel/
+.wrangler/
 gh_pages_local_game/dist/
 gh_pages_local_game/vite-dev*.log
 gh_pages_local_game/dev-server*.log
