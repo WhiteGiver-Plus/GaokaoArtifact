@@ -535,7 +535,7 @@ window.addEventListener("resize", syncColumnHeights);
 
 render();
 void loadInitialSharedReport();
-trackEvent("page_view", { debug: DEBUG_ROUTE, resultDebug: RESULT_DEBUG_ROUTE });
+trackEvent("page_view", pageViewAnalyticsProperties());
 
 function render(): void {
   const intensity = state.activeTrigger?.intensity ?? state.scoreFlash?.intensity ?? "low";
@@ -2352,6 +2352,40 @@ function createSharedReport(result: RunResult, rank?: number): SharedReport {
 
 function siteDisplayUrl(): string {
   return publicSiteUrl().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+}
+
+function pageViewAnalyticsProperties(): Record<string, unknown> {
+  const params = new URLSearchParams(window.location.search);
+  const shareCode = readShareCodeFromUrl();
+  const hasCompactShare = params.has("r");
+  return {
+    debug: DEBUG_ROUTE,
+    resultDebug: RESULT_DEBUG_ROUTE,
+    landingUrl: `${window.location.pathname}${window.location.search}`.slice(0, 600),
+    referrer: document.referrer.slice(0, 500),
+    source: landingSource(params, shareCode, hasCompactShare),
+    shareCode,
+    hasCompactShare,
+    utmSource: params.get("utm_source")?.slice(0, 120) || undefined,
+    utmMedium: params.get("utm_medium")?.slice(0, 120) || undefined,
+    utmCampaign: params.get("utm_campaign")?.slice(0, 120) || undefined
+  };
+}
+
+function landingSource(params: URLSearchParams, shareCode: string | undefined, hasCompactShare: boolean): string {
+  const utmSource = params.get("utm_source")?.trim();
+  if (utmSource) return `utm:${utmSource.slice(0, 80)}`;
+  if (shareCode) return "share-link";
+  if (hasCompactShare) return "compact-share";
+  if (document.referrer) {
+    try {
+      const referrer = new URL(document.referrer);
+      return referrer.host ? `referrer:${referrer.host.slice(0, 100)}` : "referrer";
+    } catch {
+      return "referrer";
+    }
+  }
+  return "direct";
 }
 
 async function loadInitialSharedReport(): Promise<void> {

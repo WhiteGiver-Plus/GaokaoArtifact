@@ -21,6 +21,7 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
     const sampleRate = rawSampleRate(context.env.EVENT_RAW_SAMPLE_RATE);
     const now = nowIso();
     const statements: D1PreparedStatement[] = [];
+    const sessionId = body.sessionId.slice(0, 120);
 
     for (const event of events) {
       const pagePath =
@@ -48,7 +49,7 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
              values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
           ).bind(
             randomId(),
-            body.sessionId.slice(0, 120),
+            sessionId,
             event.name,
             pagePath || null,
             jsonText(event.properties ?? {}),
@@ -58,6 +59,58 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
             now
           )
         );
+      }
+
+      if (event.name === "page_view") {
+        statements.push(
+          context.env.DB.prepare(
+            `insert into session_landing_sources
+               (session_id, first_page_path, first_landing_url, first_referrer, first_source,
+                first_share_code, first_has_compact_share, first_seen_at,
+                last_page_path, last_landing_url, last_referrer, last_source,
+                last_share_code, last_has_compact_share, last_seen_at, open_count)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
+             on conflict(session_id) do update set
+               last_page_path = excluded.last_page_path,
+               last_landing_url = excluded.last_landing_url,
+               last_referrer = excluded.last_referrer,
+               last_source = excluded.last_source,
+               last_share_code = excluded.last_share_code,
+               last_has_compact_share = excluded.last_has_compact_share,
+               last_seen_at = excluded.last_seen_at,
+               open_count = session_landing_sources.open_count + 1`
+          ).bind(
+            sessionId,
+            pagePath || null,
+            textProperty(event.properties, "landingUrl", 600),
+            textProperty(event.properties, "referrer", 500),
+            textProperty(event.properties, "source", 120) ?? "direct",
+            shareCodeProperty(event.properties),
+            booleanProperty(event.properties, "hasCompactShare") ? 1 : 0,
+            occurredAt
+          )
+        );
+
+        const shareCode = shareCodeProperty(event.properties);
+        if (shareCode) {
+          const parent = await context.env.DB.prepare(
+            "select session_id, source from share_reports where share_code = ?1"
+          )
+            .bind(shareCode)
+            .first<{ session_id: string; source: "result" | "leaderboard" }>();
+          if (parent?.session_id && parent.session_id !== sessionId) {
+            statements.push(
+              context.env.DB.prepare(
+                `insert into session_referral_edges
+                   (from_session_id, to_session_id, share_code, source, first_seen_at, last_seen_at, open_count)
+                 values (?1, ?2, ?3, ?4, ?5, ?5, 1)
+                 on conflict(from_session_id, to_session_id, share_code) do update set
+                   last_seen_at = excluded.last_seen_at,
+                   open_count = session_referral_edges.open_count + 1`
+              ).bind(parent.session_id.slice(0, 120), sessionId, shareCode, parent.source, occurredAt)
+            );
+          }
+        }
       }
     }
 
@@ -82,4 +135,20 @@ function rawSampleRate(value: string | undefined): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_RAW_SAMPLE_RATE;
   return Math.min(1, Math.max(0, parsed));
+}
+
+function textProperty(properties: Record<string, unknown> | undefined, key: string, maxLength: number): string | null {
+  const value = properties?.[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+function booleanProperty(properties: Record<string, unknown> | undefined, key: string): boolean {
+  return properties?.[key] === true;
+}
+
+function shareCodeProperty(properties: Record<string, unknown> | undefined): string | null {
+  const value = textProperty(properties, "shareCode", 16);
+  return value && /^[0-9A-Za-z]{6,16}$/.test(value) ? value : null;
 }
