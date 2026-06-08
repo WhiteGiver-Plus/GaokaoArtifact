@@ -106,7 +106,14 @@ export interface LeaderboardSharePayload {
 export interface VerifyRunResponse {
   ok: boolean;
   entry?: LeaderboardEntry;
+  ranks?: LeaderboardRankSummary;
   error?: string;
+}
+
+export interface LeaderboardRankSummary {
+  board: "standard" | "endless" | "negative";
+  totalRank?: number;
+  hourlyRank?: number;
 }
 
 export interface LeaderboardResponse {

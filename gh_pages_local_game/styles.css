@@ -1249,8 +1249,7 @@
   flex-wrap: wrap;
 }
 
-.leaderboard-share-box,
-.leaderboard-board-link-box {
+.leaderboard-share-box {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1265,9 +1264,7 @@
 }
 
 .leaderboard-share-box strong,
-.leaderboard-share-box small,
-.leaderboard-board-link-box strong,
-.leaderboard-board-link-box small {
+.leaderboard-share-box small {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -1275,15 +1272,13 @@
   white-space: nowrap;
 }
 
-.leaderboard-share-box strong,
-.leaderboard-board-link-box strong {
+.leaderboard-share-box strong {
   color: #065f46;
   font-size: 15px;
   font-weight: 950;
 }
 
-.leaderboard-share-box small,
-.leaderboard-board-link-box small {
+.leaderboard-share-box small {
   margin-top: 2px;
   color: var(--muted);
   font-family: var(--mono);
@@ -1933,14 +1928,12 @@
     min-height: 38px;
   }
 
-  .leaderboard-share-box,
-  .leaderboard-board-link-box {
+  .leaderboard-share-box {
     grid-template-columns: 1fr;
     padding-left: 10px;
   }
 
-  .leaderboard-share-box .secondary-button,
-  .leaderboard-board-link-box .secondary-button {
+  .leaderboard-share-box .secondary-button {
     width: 100%;
   }
 

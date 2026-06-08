@@ -33,6 +33,7 @@ import {
   type DecisionTrace,
   type LeaderboardEntry,
   type LeaderboardPeriod,
+  type LeaderboardRankSummary,
   type ScoreDecisionEntry,
   type ShareReportPayload
 } from "./core/trace.js";
@@ -105,6 +106,8 @@ interface LeaderboardState {
   openBoards: Record<LeaderboardBoard, boolean>;
   submittedRunId?: string;
   submittedRank?: number;
+  submittedHourlyRank?: number;
+  submittedBoard?: LeaderboardRankSummary["board"];
   selectedRunId?: string;
   shareLink?: string;
   shareText?: string;
@@ -361,10 +364,6 @@ root.addEventListener("click", (event) => {
   }
   if (action === "copy-leaderboard-share") {
     void copyLeaderboardShare();
-    return;
-  }
-  if (action === "copy-leaderboard-board" && leaderboardBoard) {
-    void copyLeaderboardBoardLink(leaderboardBoard);
     return;
   }
   if (action === "toggle-leaderboard-board" && leaderboardBoard) {
@@ -1667,7 +1666,7 @@ function renderServicesPanel(): string {
 
 function renderLeaderboardShareBox(): string {
   if (!state.leaderboard.shareText) return "";
-  const rankText = state.leaderboard.submittedRank ? `当前第 ${state.leaderboard.submittedRank} 名` : "已生成";
+  const rankText = submittedLeaderboardRankText();
   return `
     <div class="leaderboard-share-box">
       <div>
@@ -1722,7 +1721,6 @@ function renderLeaderboardBoard(board: LeaderboardBoard, title: string, descript
           <small>${escapeHtml(description)}</small>
         </button>
       </div>
-      ${open ? renderLeaderboardBoardLinkBox(board, title) : ""}
       ${
         open && entries.length
           ? `<ol class="leaderboard-list">
@@ -1733,20 +1731,6 @@ function renderLeaderboardBoard(board: LeaderboardBoard, title: string, descript
             : ""
       }
     </section>
-  `;
-}
-
-function renderLeaderboardBoardLinkBox(board: LeaderboardBoard, title: string): string {
-  const link = leaderboardBoardLink(board);
-  return `
-    <div class="leaderboard-board-link-box" data-leaderboard-board="${escapeAttr(board)}">
-      <div>
-        <span class="mono-label">BOARD SHARE</span>
-        <strong>${escapeHtml(title)}</strong>
-        <small>${escapeHtml(link)}</small>
-      </div>
-      <button class="secondary-button" type="button" data-action="copy-leaderboard-board">复制榜单链接</button>
-    </div>
   `;
 }
 
@@ -1930,7 +1914,7 @@ async function oneTapShare(): Promise<void> {
   const result = state.result;
   if (!result) return;
   const link = await resolveShareUrl(result);
-  const text = buildShareText(result, link, state.leaderboard.submittedRank);
+  const text = buildShareText(result, link, leaderboardRanksFromState());
   if (!("share" in navigator) || typeof navigator.share !== "function") {
     await copyShareLink();
     showFooterNotice("当前浏览器不支持系统分享，已改为复制战报链接。");
@@ -1964,7 +1948,7 @@ async function copyShareLink(): Promise<void> {
   const result = state.result;
   if (!result) return;
   const link = await resolveShareUrl(result);
-  const text = buildShareText(result, link, state.leaderboard.submittedRank);
+  const text = buildShareText(result, link, leaderboardRanksFromState());
   try {
     await navigator.clipboard.writeText(text);
     showCopyToast("已复制链接");
@@ -1986,23 +1970,52 @@ async function copyLeaderboardShare(): Promise<void> {
   }
 }
 
-async function copyLeaderboardBoardLink(board: LeaderboardBoard): Promise<void> {
-  const link = leaderboardBoardLink(board);
-  try {
-    await navigator.clipboard.writeText(link);
-    showCopyToast("榜单链接已复制");
-    trackEvent("leaderboard_board_link_copy", { board });
-  } catch {
-    showFooterNotice(link);
-  }
-}
-
-function buildShareText(result: RunResult, link: string, rank?: number): string {
+function buildShareText(result: RunResult, link: string, rank?: number | LeaderboardRankSummary): string {
   const playerName = publicPlayerName();
-  if (rank) {
-    return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，当前榜单第${rank}名：${link}`;
+  const ranks = typeof rank === "number" ? leaderboardRanksFromRank(result, rank) : rank;
+  if (ranks?.board === "negative" && ranks.totalRank) {
+    return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，负分榜第${ranks.totalRank}名：${link}`;
+  }
+  if (ranks?.totalRank && ranks.hourlyRank) {
+    const label = ranks.board === "standard" ? "第一年" : "无尽";
+    return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，${label}总榜第${ranks.totalRank}名，本小时第${ranks.hourlyRank}名：${link}`;
+  }
+  if (ranks?.totalRank) {
+    const label = ranks.board === "standard" ? "第一年榜" : "无尽榜";
+    return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，${label}第${ranks.totalRank}名：${link}`;
   }
   return `${playerName}在《请选择你的高考遗物》中获得了${formatNumber(result.totalScore)}分，你也来试试吧：${link}`;
+}
+
+function submittedLeaderboardRankText(): string {
+  const ranks = leaderboardRanksFromState();
+  if (ranks?.board === "negative" && ranks.totalRank) return `负分榜 #${ranks.totalRank}`;
+  if (ranks?.totalRank && ranks.hourlyRank) {
+    const label = ranks.board === "standard" ? "第一年" : "无尽";
+    return `${label}总榜 #${ranks.totalRank} · 本小时 #${ranks.hourlyRank}`;
+  }
+  if (ranks?.totalRank) {
+    const label = ranks.board === "standard" ? "第一年榜" : "无尽榜";
+    return `${label} #${ranks.totalRank}`;
+  }
+  return "已生成";
+}
+
+function leaderboardRanksFromState(): LeaderboardRankSummary | undefined {
+  if (!state.leaderboard.submittedBoard || !state.leaderboard.submittedRank) return undefined;
+  return {
+    board: state.leaderboard.submittedBoard,
+    totalRank: state.leaderboard.submittedRank,
+    hourlyRank: state.leaderboard.submittedHourlyRank
+  };
+}
+
+function leaderboardRanksFromRank(result: RunResult, rank?: number): LeaderboardRankSummary | undefined {
+  if (!rank) return undefined;
+  return {
+    board: result.totalScore < 0 ? "negative" : result.year > 1 ? "endless" : "standard",
+    totalRank: rank
+  };
 }
 
 function publicPlayerName(): string {
@@ -2127,7 +2140,8 @@ async function submitLeaderboardEntry(): Promise<void> {
   });
   if (response.ok && response.entry) {
     const targetBoard = leaderboardBoardForEntry(response.entry);
-    const rank = response.entry.rank;
+    const ranks = response.ranks ?? leaderboardRanksFromRank(result, response.entry.rank);
+    const rank = ranks?.totalRank ?? response.entry.rank;
     state.leaderboard = {
       status: "ready",
       standardHourlyEntries:
@@ -2153,6 +2167,8 @@ async function submitLeaderboardEntry(): Promise<void> {
       openBoards: state.leaderboard.openBoards,
       submittedRunId: response.entry.runId,
       submittedRank: rank,
+      submittedHourlyRank: ranks?.hourlyRank,
+      submittedBoard: ranks?.board,
       selectedRunId: response.entry.runId
     };
     showFooterNotice(rank ? `分数已提交榜单，当前第 ${rank} 名。` : "分数已提交榜单。");
@@ -2168,7 +2184,7 @@ async function submitLeaderboardEntry(): Promise<void> {
       state.leaderboard = {
         ...state.leaderboard,
         shareLink: link,
-        shareText: buildShareText(result, link, rank)
+        shareText: buildShareText(result, link, ranks)
       };
       render();
     });
@@ -2285,12 +2301,6 @@ function readLeaderboardBoardFromUrl(): LeaderboardBoard | undefined {
 
 function isLeaderboardBoard(value: string | null): value is LeaderboardBoard {
   return Boolean(value && LEADERBOARD_BOARDS.some((board) => board.id === value));
-}
-
-function leaderboardBoardLink(board: LeaderboardBoard): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set("board", board);
-  return url.toString();
 }
 
 function leaderboardRootSeed(seed: string): string {

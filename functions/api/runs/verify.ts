@@ -1,4 +1,8 @@
-import type { LeaderboardSharePayload, VerifyRunRequest } from "../../../gh_pages_local_game/src/core/trace.js";
+import type {
+  LeaderboardRankSummary,
+  LeaderboardSharePayload,
+  VerifyRunRequest
+} from "../../../gh_pages_local_game/src/core/trace.js";
 import { DEBUG_NICKNAME, reviewNickname, sanitizeNickname } from "../../../gh_pages_local_game/src/core/moderation.js";
 import { assertClientResultMatches, replayDecisionTrace } from "../_lib/verifyRun.js";
 import { checkRateLimit } from "../_lib/rateLimit.js";
@@ -156,7 +160,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
       .first<LeaderboardRow>();
     if (!entry) throw new Error("leaderboard_write_failed");
 
-    const rank = await leaderboardRank(context.env.DB, entry.score, entry.year, entry.created_at);
+    const ranks = await leaderboardRanks(context.env.DB, entry.score, entry.year, entry.created_at);
+    const rank = ranks.totalRank;
     const responseSharePayload = {
       ...(parseJsonField<LeaderboardSharePayload>(entry.share_payload) ?? sharePayload),
       rank
@@ -177,7 +182,8 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
         createdAt: entry.created_at,
         appVersion: parseJsonField(entry.app_version) ?? responseSharePayload.appVersion,
         share: responseSharePayload
-      }
+      },
+      ranks
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "verify_failed";
@@ -187,16 +193,29 @@ export async function onRequestPost(context: HandlerContext): Promise<Response> 
   }
 }
 
-async function leaderboardRank(db: D1Database, score: number, year: number, createdAt: string): Promise<number> {
+async function leaderboardRanks(db: D1Database, score: number, year: number, createdAt: string): Promise<LeaderboardRankSummary> {
+  const totalRank = await leaderboardRank(db, score, year, createdAt);
+  if (score < 0) return { board: "negative", totalRank };
+  return {
+    board: year > 1 ? "endless" : "standard",
+    totalRank,
+    hourlyRank: await leaderboardRank(db, score, year, createdAt, true)
+  };
+}
+
+async function leaderboardRank(db: D1Database, score: number, year: number, createdAt: string, hourly = false): Promise<number> {
+  const hourlyWhere = hourly ? "and created_at >= strftime('%Y-%m-%dT%H:00:00.000Z', 'now')" : "";
+  const hourlyEntryWhere = hourly ? "and entry.created_at >= strftime('%Y-%m-%dT%H:00:00.000Z', 'now')" : "";
+  const hourlyHigherWhere = hourly ? "and higher.created_at >= strftime('%Y-%m-%dT%H:00:00.000Z', 'now')" : "";
   if (score < 0) {
     return (
       (await countEntries(
         db,
         `select coalesce(sum(count), 0) as count
          from (
-           select count(*) as count from leaderboard_entries where score < ?1
+           select count(*) as count from leaderboard_entries where score < ?1 ${hourlyWhere}
            union all
-           select count(*) as count from leaderboard_entries where score = ?1 and created_at < ?2
+           select count(*) as count from leaderboard_entries where score = ?1 and created_at < ?2 ${hourlyWhere}
          )`,
         score,
         createdAt
@@ -214,11 +233,13 @@ async function leaderboardRank(db: D1Database, score: number, year: number, crea
            from leaderboard_entries as entry
            where entry.score >= 0
              and entry.year > 1
+             ${hourlyEntryWhere}
              and not exists (
                select 1
                from leaderboard_entries as higher
                where higher.score >= 0
                  and higher.year > entry.year
+                 ${hourlyHigherWhere}
                  and ${leaderboardRootSeedSql("higher")} = ${leaderboardRootSeedSql("entry")}
              )
              and entry.year > ?1
@@ -227,11 +248,13 @@ async function leaderboardRank(db: D1Database, score: number, year: number, crea
            from leaderboard_entries as entry
            where entry.score >= 0
              and entry.year > 1
+             ${hourlyEntryWhere}
              and not exists (
                select 1
                from leaderboard_entries as higher
                where higher.score >= 0
                  and higher.year > entry.year
+                 ${hourlyHigherWhere}
                  and ${leaderboardRootSeedSql("higher")} = ${leaderboardRootSeedSql("entry")}
              )
              and entry.year = ?1
@@ -241,11 +264,13 @@ async function leaderboardRank(db: D1Database, score: number, year: number, crea
            from leaderboard_entries as entry
            where entry.score >= 0
              and entry.year > 1
+             ${hourlyEntryWhere}
              and not exists (
                select 1
                from leaderboard_entries as higher
                where higher.score >= 0
                  and higher.year > entry.year
+                 ${hourlyHigherWhere}
                  and ${leaderboardRootSeedSql("higher")} = ${leaderboardRootSeedSql("entry")}
              )
              and entry.year = ?1
@@ -264,9 +289,9 @@ async function leaderboardRank(db: D1Database, score: number, year: number, crea
       db,
       `select coalesce(sum(count), 0) as count
          from (
-         select count(*) as count from leaderboard_entries where year = 1 and score >= 0 and score > ?1
+         select count(*) as count from leaderboard_entries where year = 1 and score >= 0 and score > ?1 ${hourlyWhere}
          union all
-         select count(*) as count from leaderboard_entries where year = 1 and score >= 0 and score = ?1 and created_at < ?2
+         select count(*) as count from leaderboard_entries where year = 1 and score >= 0 and score = ?1 and created_at < ?2 ${hourlyWhere}
        )`,
       score,
       createdAt
