@@ -20,6 +20,8 @@ export interface GameState {
   triggerCounts: Map<string, number>;
   instanceSeq: number;
   currentEventCount: number;
+  artifactGainDepth: number;
+  artifactLimitEnforcementDepth: number;
   subjects: SubjectId[];
   nextExamQuestionModifiers: QuestionModifier[];
   onLog?: (line: string) => void;
@@ -56,6 +58,8 @@ export function createGameState(
     triggerCounts: new Map(),
     instanceSeq: 0,
     currentEventCount: 0,
+    artifactGainDepth: 0,
+    artifactLimitEnforcementDepth: 0,
     subjects,
     nextExamQuestionModifiers: []
   };

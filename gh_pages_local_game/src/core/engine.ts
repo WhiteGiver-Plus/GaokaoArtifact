@@ -276,13 +276,20 @@ async function gainArtifact(
   if (!config) {
     throw new Error(`Unknown artifact: ${artifactId}`);
   }
-  const owned = createOwnedArtifact(state, artifactId);
-  state.artifacts.push(owned);
-  appendLog(state, `获得遗物: ${config.name}`);
-  state.currentEventCount = 0;
-  await triggerOwnedArtifact(state, owned, "ARTIFACT_GAINED", undefined, hooks, options);
-  emitArtifactsChanged(state, hooks);
-  await enforceArtifactLimit(state, hooks, options);
+  state.artifactGainDepth += 1;
+  try {
+    const owned = createOwnedArtifact(state, artifactId);
+    state.artifacts.push(owned);
+    appendLog(state, `获得遗物: ${config.name}`);
+    state.currentEventCount = 0;
+    await triggerOwnedArtifact(state, owned, "ARTIFACT_GAINED", undefined, hooks, options);
+    emitArtifactsChanged(state, hooks);
+  } finally {
+    state.artifactGainDepth = Math.max(0, state.artifactGainDepth - 1);
+  }
+  if (state.artifactGainDepth === 0 && state.artifactLimitEnforcementDepth === 0) {
+    await enforceArtifactLimit(state, hooks, options);
+  }
 }
 
 async function enforceArtifactLimit(
@@ -290,17 +297,22 @@ async function enforceArtifactLimit(
   hooks: ChoiceHooks,
   options: GameOptions
 ): Promise<void> {
-  while (state.artifacts.length > queryModifierValue(state, "artifactLimit", state.stats.artifactLimit)) {
-    if (state.stats.preventDiscardCharges > 0) {
-      state.stats.preventDiscardCharges -= 1;
-      appendLog(state, "遗物上限超出，但本次丢弃被免除。");
-      return;
+  state.artifactLimitEnforcementDepth += 1;
+  try {
+    while (state.artifacts.length > queryModifierValue(state, "artifactLimit", state.stats.artifactLimit)) {
+      if (state.stats.preventDiscardCharges > 0) {
+        state.stats.preventDiscardCharges -= 1;
+        appendLog(state, "遗物上限超出，但本次丢弃被免除。");
+        return;
+      }
+      const configs = state.artifacts.map((owned) => state.artifactById.get(owned.artifactId)!);
+      const chosen = hooks.chooseDiscard
+        ? await hooks.chooseDiscard(configs)
+        : autoDiscardIndex(configs, options, state);
+      await loseArtifactAt(state, clampIndex(chosen, state.artifacts.length), hooks, options);
     }
-    const configs = state.artifacts.map((owned) => state.artifactById.get(owned.artifactId)!);
-    const chosen = hooks.chooseDiscard
-      ? await hooks.chooseDiscard(configs)
-      : autoDiscardIndex(configs, options, state);
-    await loseArtifactAt(state, clampIndex(chosen, state.artifacts.length), hooks, options);
+  } finally {
+    state.artifactLimitEnforcementDepth = Math.max(0, state.artifactLimitEnforcementDepth - 1);
   }
 }
 
