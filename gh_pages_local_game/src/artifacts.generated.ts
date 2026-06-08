@@ -844,7 +844,7 @@ export const LOCAL_ARTIFACTS = [
       "遗物流",
       "联动"
     ],
-    "description": "模仿右侧第一张遗物。",
+    "description": "若右侧第一张遗物也会在当前时机触发，则额外触发它一次。",
     "modifiers": [],
     "triggers": [
       {
@@ -936,7 +936,7 @@ export const LOCAL_ARTIFACTS = [
       "联动",
       "豌豆"
     ],
-    "description": "每次其他遗物触发时，20% 概率触发其右侧的第一个遗物。",
+    "description": "其他遗物触发时，20% 概率触发瓷砖萝卜右侧第一张遗物的同一时机效果。",
     "modifiers": [],
     "triggers": [
       {
