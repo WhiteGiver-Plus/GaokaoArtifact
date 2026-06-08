@@ -1,92 +1,50 @@
 # 请选择你的高考遗物
 
-本分支只保留 GitHub Pages 本地静态游戏，以及它生成前端数据所需的遗物 JSON 数据源。旧 CLI、旧 `web_game`、旧 `gh-pages` 发布目录和 Wiki/测试/调研脚本不再作为本分支主体。
+一款高考主题的遗物构筑小游戏。你会在开局和考试过程中选择遗物，组合正确率、体力、倍率、补分、改判等效果，尽量把六科总分堆到更高。
 
-## 目录
+## 怎么玩
 
-```text
-.
-├─ gh_pages_local_game/        # Vite 静态网页游戏
-│  ├─ index.html
-│  ├─ assets/
-│  ├─ scripts/buildArtifactsData.ts
-│  └─ src/
-│     ├─ main.ts
-│     ├─ artifacts.generated.ts
-│     └─ core/                 # 本地游戏内置规则引擎
-├─ data/artifacts.json         # 遗物数据源
-├─ package.json
-└─ tsconfig.json
-```
+打开游戏后，先输入昵称并选择选考科目。开局会连续出现 6 次遗物选择，每次 4 选 1。选完后依次进行语文、数学、英语和 3 门选考科目的考试。
 
-## 使用
+考试会自动判题。每题都有正确率、得分倍率和体力变化，遗物会在对应时机触发并改变结果。你可以暂停自动播放，也可以把速度切到 1x、2x、4x 或 8x。
 
-玩法与状态说明见 [`gh_pages_local_game/HELP.md`](./gh_pages_local_game/HELP.md)。
+一轮考试结束后会生成战报，展示总分、各科分数、遗物列表和本局 seed。你可以复制战报链接、下载战报图，也可以提交分数到榜单。
 
-安装依赖：
+## 基本规则
+
+- 语文、数学、英语各 15 题，单科标准满分 150 分。
+- 3 门选考科目各 10 题，单科标准满分 100 分。
+- 六科标准满分为 750 分。
+- 默认基础正确率为 50%，体力越高，实际正确率越高。
+- 每场考试开始时，当前体力会恢复到基础体力。
+- 遗物按照触发时机和准考证上的顺序结算。
+
+更完整的规则说明见 [帮助文档](./gh_pages_local_game/HELP.md)。
+
+## 无尽模式
+
+总分超过 750 分后，可以进入无尽模式。无尽模式会保留当前遗物组，并进入下一年高考。
+
+无尽模式中，每科开考前都会再获得一次 4 选 1 遗物机会。录取线从 750 分开始，每进入下一年都会乘以 3。撑得越久，榜单成绩越靠前。
+
+## 分享和榜单
+
+结算页可以：
+
+- 复制战报链接给别人查看。
+- 下载战报图。
+- 提交分数到普通榜单或无尽榜单。
+- 展开榜单条目查看对方的战报摘要。
+
+如果后端服务暂时不可用，游戏本体仍可正常游玩；分享链接和榜单功能可能会退化为本地战报。
+
+## 本地游玩
+
+如果你拿到的是项目源码，可以在本机运行：
 
 ```powershell
 npm install
-```
-
-重新从 `data/artifacts.json` 生成前端内嵌数据：
-
-```powershell
-npm run game:data
-```
-
-本地启动：
-
-```powershell
 npm run game:dev
 ```
 
-构建静态页面：
-
-```powershell
-npm run game:build
-```
-
-类型检查：
-
-```powershell
-npm run typecheck
-```
-
-## Cloudflare Pages + D1
-
-本分支使用 Cloudflare Pages 托管静态前端，使用 Pages Functions 提供同源 `/api` 后端，D1 数据库名为 `gaokao-artifact-stats`，Pages 项目名为 `gaokao-artifact`。D1 为空库上线，不导入旧 Supabase 数据；旧 Supabase migration 保留在 `supabase/migrations/` 作为 legacy 记录。
-
-本地初始化 D1：
-
-```powershell
-npm run cf:d1:local
-```
-
-本地构建并启动 Cloudflare Pages Functions：
-
-```powershell
-npm run cf:dev
-```
-
-上线前先创建远端 D1，并把 Cloudflare 返回的 `database_id` 写入 `wrangler.jsonc`：
-
-```powershell
-npx wrangler login
-npx wrangler d1 create gaokao-artifact-stats
-npm run cf:d1:remote
-npm run cf:deploy
-```
-
-生产环境建议在 Cloudflare Pages 项目设置中配置 `LEADERBOARD_SALT`。`EVENT_RAW_SAMPLE_RATE` 可选，默认 `0.1`，事件数据优先写入日聚合表，少量 raw payload 仅用于排查。
-
-常用查数命令：
-
-```powershell
-npx wrangler d1 execute gaokao-artifact-stats --remote --command "select created_at, nickname, contact, message, seed from feedback order by created_at desc limit 20;"
-npx wrangler d1 execute gaokao-artifact-stats --remote --command "select nickname, score, year, seed, created_at from leaderboard_entries order by year desc, score desc, created_at asc limit 20;"
-npx wrangler d1 execute gaokao-artifact-stats --remote --command "select day, event_name, page_path, app_commit, count from analytics_event_counts order by day desc, count desc limit 50;"
-npx wrangler d1 execute gaokao-artifact-stats --remote --command "select share_code, player_name, rank, created_at from share_reports order by created_at desc limit 20;"
-```
-
-也可以在 Cloudflare Dashboard 的 D1 控制台直接查看 `feedback`、`leaderboard_entries`、`analytics_event_counts`、`share_reports` 等表。
+启动后按终端提示打开本地地址，默认是 `http://127.0.0.1:5175` 附近的端口。

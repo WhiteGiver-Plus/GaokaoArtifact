@@ -330,6 +330,10 @@ root.addEventListener("click", (event) => {
     void copyShareLink();
     return;
   }
+  if (action === "one-tap-share") {
+    void oneTapShare();
+    return;
+  }
   if (action === "copy-leaderboard-share") {
     void copyLeaderboardShare();
     return;
@@ -1499,16 +1503,25 @@ function renderResult(result: RunResult): string {
       <div class="result-card">
         <p class="mono-label">${state.endlessActive ? `ENDLESS YEAR ${result.year}` : "FINAL SCORE"}</p>
         <div class="final-score ${result.totalScore > 750 ? "over-score" : ""}">${totalScoreText}</div>
-        <h1>${title}</h1>
-        <p>${escapeHtml(publicPlayerName())} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件遗物。</p>
-        <div class="endless-panel ${passedThreshold ? "passed" : "failed"}">
-          <div>
-            <span>${passedThreshold ? "下一年录取线" : "本轮录取线"}</span>
-            <strong>${passedThreshold ? nextThresholdText : thresholdText}</strong>
+        <div class="result-title-row">
+          <h1>${title}</h1>
+          <div class="result-share-actions" aria-label="分享操作">
+            <button class="primary-button result-share-primary" type="button" data-action="one-tap-share">一键分享</button>
+            <button class="secondary-button" type="button" data-action="copy-share-link">复制链接</button>
+            <button class="secondary-button" type="button" data-action="download-share-image">下载战报图</button>
           </div>
-          <p>${passedThreshold ? "进入下一年后保留当前遗物组；每科开考前获得一次 4 选 1。" : "达到本轮录取线后可进入下一年。"}</p>
         </div>
         ${renderShareCard(result, title)}
+        <div class="result-lower-summary">
+          <p>${escapeHtml(publicPlayerName())} 的六科已交卷。准考证收录 ${result.artifactNames.length} 件遗物。</p>
+          <div class="endless-panel ${passedThreshold ? "passed" : "failed"}">
+            <div>
+              <span>${passedThreshold ? "下一年录取线" : "本轮录取线"}</span>
+              <strong>${passedThreshold ? nextThresholdText : thresholdText}</strong>
+            </div>
+            <p>${passedThreshold ? "进入下一年后保留当前遗物组；每科开考前获得一次 4 选 1。" : "达到本轮录取线后可进入下一年。"}</p>
+          </div>
+        </div>
         ${renderResultArtifacts(result)}
         <div class="result-subjects">
           ${renderResultSubjectRows(result)}
@@ -1516,8 +1529,6 @@ function renderResult(result: RunResult): string {
         ${renderServicesPanel()}
         <div class="result-actions">
           ${passedThreshold && !RESULT_DEBUG_ROUTE ? `<button class="primary-button" type="button" data-action="continue-endless">进入第 ${result.year + 1} 年</button>` : ""}
-          <button class="secondary-button" type="button" data-action="copy-share-link">复制战报链接</button>
-          <button class="secondary-button" type="button" data-action="download-share-image">下载战报图</button>
           ${
             RESULT_DEBUG_ROUTE
               ? `<button class="secondary-button" type="button" data-action="reset-result-debug">重置示例</button>`
@@ -1860,6 +1871,40 @@ function drawerOpenAttr(key: DrawerKey): string {
   return state.drawerOpen[key] ? "open" : "";
 }
 
+async function oneTapShare(): Promise<void> {
+  const result = state.result;
+  if (!result) return;
+  const link = await resolveShareUrl(result);
+  const text = buildShareText(result, link, state.leaderboard.submittedRank);
+  if (!("share" in navigator) || typeof navigator.share !== "function") {
+    await copyShareLink();
+    showFooterNotice("当前浏览器不支持系统分享，已改为复制战报链接。");
+    return;
+  }
+  try {
+    const shareData: ShareData = {
+      title: "请选择你的高考遗物",
+      text,
+      url: link
+    };
+    if ("canShare" in navigator && typeof navigator.canShare === "function") {
+      const file = await createShareImageFile(result, link);
+      if (navigator.canShare({ files: [file] })) {
+        shareData.files = [file];
+      }
+    }
+    await navigator.share(shareData);
+    trackEvent("share_native", { score: Math.round(result.totalScore), year: result.year, withImage: Boolean(shareData.files?.length) });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      showFooterNotice("分享已取消。");
+      return;
+    }
+    await copyShareLink();
+    showFooterNotice("系统分享暂不可用，已改为复制战报链接。");
+  }
+}
+
 async function copyShareLink(): Promise<void> {
   const result = state.result;
   if (!result) return;
@@ -1915,6 +1960,13 @@ async function downloadShareImage(): Promise<void> {
   } catch {
     showFooterNotice("战报图生成失败，请先复制战报链接。");
   }
+}
+
+async function createShareImageFile(result: RunResult, link: string): Promise<File> {
+  const dataUrl = await createShareImageDataUrl(result, link);
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  return new File([blob], `gaokao-report-${sanitizeFilename(result.seed)}.png`, { type: "image/png" });
 }
 
 async function refreshLeaderboard(silent = false): Promise<void> {
