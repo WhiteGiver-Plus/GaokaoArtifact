@@ -300,9 +300,9 @@ function audioAssetUrl(path: string): string {
 
 function readBgmEnabled(): boolean {
   try {
-    return window.localStorage.getItem(BGM_STORAGE_KEY) !== "off";
+    return window.localStorage.getItem(BGM_STORAGE_KEY) === "on";
   } catch {
-    return true;
+    return false;
   }
 }
 
