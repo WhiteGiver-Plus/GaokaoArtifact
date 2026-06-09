@@ -1,6 +1,6 @@
 {
-  "name": "请选择你的高考遗物",
-  "short_name": "高考遗物",
+  "name": "请选择你的高考藏品",
+  "short_name": "高考藏品",
   "description": "一个文字驱动的高考自动考试构筑游戏。",
   "start_url": "./",
   "scope": "./",

@@ -90,7 +90,7 @@ async function replaySegment(segment: DecisionTraceRun, options: GameOptions): P
 
   const result = await runGame(LOCAL_ARTIFACTS, options, {
     chooseArtifact: (choices, reason) => consumeArtifactDecision(nextEntry(), choices, reason, false),
-    chooseDiscard: (owned) => consumeArtifactDecision(nextEntry(), owned, "遗物已达上限", true),
+    chooseDiscard: (owned) => consumeArtifactDecision(nextEntry(), owned, "藏品已达上限", true),
     chooseOnesDigit: (score, subject) => {
       const value = consumeScoreDecision(nextEntry(), "onesDigit", Math.round(score), subject);
       if (typeof value !== "number") throw new Error("invalid_ones_digit");

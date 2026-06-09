@@ -357,10 +357,10 @@ export const LOCAL_ARTIFACTS = [
     "name": "多选题",
     "rarity": "uncommon",
     "tags": [
-      "遗物流",
+      "藏品流",
       "抽取"
     ],
-    "description": "每次抽取遗物时，备选数 +1。",
+    "description": "每次抽取藏品时，备选数 +1。",
     "modifiers": [
       {
         "target": "draftChoicesBonus",
@@ -377,11 +377,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "无中生有",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "抽取",
       "消耗"
     ],
-    "description": "随机获得 2 件遗物，然后销毁自身。",
+    "description": "随机获得 2 件藏品，然后销毁自身。",
     "modifiers": [],
     "triggers": [
       {
@@ -405,11 +405,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "上线立送10连抽",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "抽取",
       "消耗"
     ],
-    "description": "立刻进行一次 10 选 1 遗物抽取。",
+    "description": "立刻进行一次 10 选 1 藏品抽取。",
     "modifiers": [],
     "triggers": [
       {
@@ -431,11 +431,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "我们可以改变一切",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "销毁",
       "分数补偿"
     ],
-    "description": "销毁最左侧的遗物(若为自身则不销毁)；下场考试初始分 +200。",
+    "description": "销毁最左侧的藏品(若为自身则不销毁)；下场考试初始分 +200。",
     "modifiers": [],
     "triggers": [
       {
@@ -460,11 +460,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "白银狮子",
     "rarity": "uncommon",
     "tags": [
-      "遗物流",
+      "藏品流",
       "销毁",
       "分数补偿"
     ],
-    "description": "失去这件遗物时，下场考试初始分 +100。",
+    "description": "失去这件藏品时，下场考试初始分 +100。",
     "modifiers": [],
     "triggers": [
       {
@@ -841,10 +841,10 @@ export const LOCAL_ARTIFACTS = [
     "name": "模仿者",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "联动"
     ],
-    "description": "若右侧第一张遗物也会在当前时机触发，则额外触发它一次。",
+    "description": "若右侧第一张藏品也会在当前时机触发，则额外触发它一次。",
     "modifiers": [],
     "triggers": [
       {
@@ -884,11 +884,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "双发射手",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "联动",
       "豌豆"
     ],
-    "description": "每次其他遗物触发时，20% 概率多触发一次。",
+    "description": "每次其他藏品触发时，20% 概率多触发一次。",
     "modifiers": [],
     "triggers": [
       {
@@ -908,11 +908,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "机枪射手",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "联动",
       "豌豆"
     ],
-    "description": "每次其他遗物触发时，20% 概率多触发三次。",
+    "description": "每次其他藏品触发时，20% 概率多触发三次。",
     "modifiers": [],
     "triggers": [
       {
@@ -932,11 +932,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "瓷砖萝卜",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "联动",
       "豌豆"
     ],
-    "description": "其他遗物触发时，20% 概率触发瓷砖萝卜右侧第一张遗物的同一时机效果。",
+    "description": "其他藏品触发时，20% 概率触发瓷砖萝卜右侧第一张藏品的同一时机效果。",
     "modifiers": [],
     "triggers": [
       {
@@ -955,7 +955,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "电能机枪豌豆",
     "rarity": "special",
     "tags": [
-      "遗物流",
+      "藏品流",
       "联动",
       "豌豆"
     ],
@@ -970,9 +970,9 @@ export const LOCAL_ARTIFACTS = [
     "name": "上海卷高考作文",
     "rarity": "common",
     "tags": [
-      "无效遗物"
+      "无效藏品"
     ],
-    "description": "有人说，这个遗物没有任何效果，也有人认为不尽如此，你怎么看？无任何效果。",
+    "description": "有人说，这个藏品没有任何效果，也有人认为不尽如此，你怎么看？无任何效果。",
     "modifiers": [],
     "triggers": [],
     "maxCopies": 1,
@@ -983,7 +983,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "说的道理",
     "rarity": "common",
     "tags": [
-      "无效遗物"
+      "无效藏品"
     ],
     "description": "说的道理。无任何效果。",
     "modifiers": [],
@@ -1525,11 +1525,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "心外无物",
     "rarity": "special",
     "tags": [
-      "遗物流",
+      "藏品流",
       "销毁",
       "总分成长"
     ],
-    "description": "获得时，弃掉其余所有遗物；每因此弃掉 1 件，当前总分 x1.4。",
+    "description": "获得时，弃掉其余所有藏品；每因此弃掉 1 件，当前总分 x1.4。",
     "modifiers": [],
     "triggers": [
       {
@@ -1550,11 +1550,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "轻装上阵",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "容量",
       "总分成长"
     ],
-    "description": "遗物上限永久 -1；获得时，当前总分 x1.5。",
+    "description": "藏品上限永久 -1；获得时，当前总分 x1.5。",
     "modifiers": [
       {
         "target": "artifactLimit",
@@ -1582,7 +1582,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "小丑牌",
     "rarity": "common",
     "tags": [
-      "无效遗物"
+      "无效藏品"
     ],
     "description": "仅仅是这张牌很小丑。无任何效果。",
     "modifiers": [],
@@ -1595,7 +1595,7 @@ export const LOCAL_ARTIFACTS = [
     "name": "暂时不能给你明确的答复",
     "rarity": "common",
     "tags": [
-      "无效遗物"
+      "无效藏品"
     ],
     "description": "暂时不能给你明确的效果。",
     "modifiers": [],
@@ -1608,16 +1608,16 @@ export const LOCAL_ARTIFACTS = [
     "name": "废话文学领域大神",
     "rarity": "rare",
     "tags": [
-      "无效遗物"
+      "无效藏品"
     ],
-    "description": "每科考试结束时，按无效遗物数量使本场考试最终得分增加：1/2/3/4+ 件对应 200/2000/50000/500000。",
+    "description": "每科考试结束时，按无效藏品数量使本场考试最终得分增加：1/2/3/4+ 件对应 200/2000/50000/500000。",
     "modifiers": [],
     "triggers": [
       {
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "无效遗物",
+          "tag": "无效藏品",
           "op": "eq",
           "value": 1
         },
@@ -1632,7 +1632,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "无效遗物",
+          "tag": "无效藏品",
           "op": "eq",
           "value": 2
         },
@@ -1647,7 +1647,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "无效遗物",
+          "tag": "无效藏品",
           "op": "eq",
           "value": 3
         },
@@ -1662,7 +1662,7 @@ export const LOCAL_ARTIFACTS = [
         "timing": "EXAM_END",
         "condition": {
           "kind": "ownedTagCount",
-          "tag": "无效遗物",
+          "tag": "无效藏品",
           "op": "gte",
           "value": 4
         },
@@ -1749,11 +1749,11 @@ export const LOCAL_ARTIFACTS = [
     "name": "能连起来就是招",
     "rarity": "rare",
     "tags": [
-      "遗物流",
+      "藏品流",
       "联动",
       "分数补偿"
     ],
-    "description": "每题结算时，考试最终分数增加 2 的本题此前触发遗物次数次方分，上限 128。",
+    "description": "每题结算时，考试最终分数增加 2 的本题此前触发藏品次数次方分，上限 128。",
     "modifiers": [],
     "triggers": [
       {

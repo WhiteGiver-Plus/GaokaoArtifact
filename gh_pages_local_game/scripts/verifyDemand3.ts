@@ -92,7 +92,7 @@ function verifyArchetypeTags(artifactConfigs: ArtifactConfig[]): void {
     "连败",
     "连胜",
     "胜败交替",
-    "遗物流",
+    "藏品流",
     "体力",
     "错题",
     "幸运方块",
