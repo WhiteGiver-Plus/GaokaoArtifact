@@ -123,6 +123,7 @@ interface LeaderboardState {
   standardEntries: LeaderboardEntry[];
   endlessEntries: LeaderboardEntry[];
   negativeEntries: LeaderboardEntry[];
+  highScoreEntries: LeaderboardEntry[];
   standardHourlyEntries: LeaderboardEntry[];
   endlessHourlyEntries: LeaderboardEntry[];
   openBoards: Record<LeaderboardBoard, boolean>;
@@ -246,6 +247,7 @@ const INITIAL_SHARED_REPORT_CODE = RESULT_DEBUG_ROUTE ? undefined : readShareCod
 const LEADERBOARD_BOARDS: Array<{ id: LeaderboardBoard; title: string; period: LeaderboardPeriod; description: string }> = [
   { id: "standard-hourly", title: "本小时第一年榜", period: "standard-hourly", description: "当前小时刷新" },
   { id: "endless-hourly", title: "本小时无尽榜", period: "endless-hourly", description: "当前小时刷新" },
+  { id: "highscore", title: "高分榜", period: "highscore", description: "历史总榜" },
   { id: "standard", title: "第一年榜", period: "standard", description: "历史总榜" },
   { id: "endless", title: "无尽榜", period: "endless", description: "历史总榜" },
   { id: "negative", title: "负分榜", period: "negative", description: "历史总榜" }
@@ -305,6 +307,7 @@ const state: UiState = {
     standardEntries: [],
     endlessEntries: [],
     negativeEntries: [],
+    highScoreEntries: [],
     standardHourlyEntries: [],
     endlessHourlyEntries: [],
     openBoards: INITIAL_LEADERBOARD_OPEN_BOARDS
@@ -2323,9 +2326,10 @@ async function refreshLeaderboard(silent = false): Promise<void> {
     state.leaderboard = { ...state.leaderboard, status: "loading", error: undefined };
     render();
   }
-  const [standardHourlyResponse, endlessHourlyResponse, standardResponse, endlessResponse, negativeResponse] = await Promise.all([
+  const [standardHourlyResponse, endlessHourlyResponse, highScoreResponse, standardResponse, endlessResponse, negativeResponse] = await Promise.all([
     loadLeaderboard("standard-hourly"),
     loadLeaderboard("endless-hourly"),
+    loadLeaderboard("highscore"),
     loadLeaderboard("standard"),
     loadLeaderboard("endless"),
     loadLeaderboard("negative")
@@ -2333,6 +2337,7 @@ async function refreshLeaderboard(silent = false): Promise<void> {
   if (
     standardHourlyResponse.ok &&
     endlessHourlyResponse.ok &&
+    highScoreResponse.ok &&
     standardResponse.ok &&
     endlessResponse.ok &&
     negativeResponse.ok
@@ -2342,6 +2347,7 @@ async function refreshLeaderboard(silent = false): Promise<void> {
       status: "ready",
       standardHourlyEntries: standardHourlyResponse.entries,
       endlessHourlyEntries: endlessHourlyResponse.entries,
+      highScoreEntries: highScoreResponse.entries,
       standardEntries: standardResponse.entries,
       endlessEntries: endlessResponse.entries,
       negativeEntries: negativeResponse.entries,
@@ -2354,6 +2360,7 @@ async function refreshLeaderboard(silent = false): Promise<void> {
       error:
         standardHourlyResponse.error ??
         endlessHourlyResponse.error ??
+        highScoreResponse.error ??
         standardResponse.error ??
         endlessResponse.error ??
         negativeResponse.error ??
@@ -2429,6 +2436,14 @@ async function submitLeaderboardEntry(): Promise<void> {
         targetBoard === "endless"
           ? mergeLeaderboardEntry(response.entry, state.leaderboard.endlessEntries, "endless")
           : state.leaderboard.endlessEntries,
+      highScoreEntries:
+        response.entry.score >= 0
+          ? mergeLeaderboardEntry(
+              { ...response.entry, rank: ranks?.highScoreRank },
+              state.leaderboard.highScoreEntries,
+              "highscore"
+            )
+          : state.leaderboard.highScoreEntries,
       negativeEntries:
         targetBoard === "negative"
           ? mergeLeaderboardEntry(response.entry, state.leaderboard.negativeEntries, "negative")
@@ -2528,6 +2543,9 @@ function compareLeaderboardEntries(left: LeaderboardEntry, right: LeaderboardEnt
   if (board === "negative") {
     return left.score - right.score || left.createdAt.localeCompare(right.createdAt);
   }
+  if (board === "highscore") {
+    return right.score - left.score || left.createdAt.localeCompare(right.createdAt);
+  }
   if (board === "endless" || board === "endless-hourly") {
     return right.year - left.year || right.score - left.score || left.createdAt.localeCompare(right.createdAt);
   }
@@ -2543,6 +2561,7 @@ function leaderboardBoardForEntry(entry: LeaderboardEntry): LeaderboardBoard {
 function leaderboardEntries(board: LeaderboardBoard): LeaderboardEntry[] {
   if (board === "standard-hourly") return state.leaderboard.standardHourlyEntries;
   if (board === "endless-hourly") return state.leaderboard.endlessHourlyEntries;
+  if (board === "highscore") return state.leaderboard.highScoreEntries;
   if (board === "standard") return state.leaderboard.standardEntries;
   if (board === "endless") return state.leaderboard.endlessEntries;
   return state.leaderboard.negativeEntries;
@@ -2553,6 +2572,7 @@ function initialLeaderboardOpenBoards(): Record<LeaderboardBoard, boolean> {
   return {
     "standard-hourly": selected ? selected === "standard-hourly" : true,
     "endless-hourly": selected ? selected === "endless-hourly" : true,
+    highscore: selected === "highscore",
     standard: selected === "standard",
     endless: selected === "endless",
     negative: selected === "negative"
@@ -3405,6 +3425,7 @@ function resetServiceState(): void {
     standardEntries: [],
     endlessEntries: [],
     negativeEntries: [],
+    highScoreEntries: [],
     standardHourlyEntries: [],
     endlessHourlyEntries: [],
     openBoards: initialLeaderboardOpenBoards()

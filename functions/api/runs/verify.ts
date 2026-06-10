@@ -199,7 +199,8 @@ async function leaderboardRanks(db: D1Database, score: number, year: number, cre
   return {
     board: year > 1 ? "endless" : "standard",
     totalRank,
-    hourlyRank: await leaderboardRank(db, score, year, createdAt, true)
+    hourlyRank: await leaderboardRank(db, score, year, createdAt, true),
+    highScoreRank: await highScoreRank(db, score, createdAt)
   };
 }
 
@@ -302,6 +303,22 @@ async function leaderboardRank(db: D1Database, score: number, year: number, crea
 async function countEntries(db: D1Database, sql: string, ...bindings: D1Value[]): Promise<number> {
   const row = await db.prepare(sql).bind(...bindings).first<{ count: number }>();
   return row?.count ?? 0;
+}
+
+async function highScoreRank(db: D1Database, score: number, createdAt: string): Promise<number> {
+  return (
+    (await countEntries(
+      db,
+      `select coalesce(sum(count), 0) as count
+       from (
+         select count(*) as count from leaderboard_entries where score >= 0 and score > ?1
+         union all
+         select count(*) as count from leaderboard_entries where score >= 0 and score = ?1 and created_at < ?2
+       )`,
+      score,
+      createdAt
+    )) + 1
+  );
 }
 
 function leaderboardRootSeedSql(alias: string): string {

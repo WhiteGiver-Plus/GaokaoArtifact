@@ -114,6 +114,7 @@ export interface LeaderboardRankSummary {
   board: "standard" | "endless" | "negative";
   totalRank?: number;
   hourlyRank?: number;
+  highScoreRank?: number;
 }
 
 export interface LeaderboardResponse {
@@ -122,7 +123,7 @@ export interface LeaderboardResponse {
   error?: string;
 }
 
-export type LeaderboardPeriod = "standard" | "endless" | "negative" | "standard-hourly" | "endless-hourly";
+export type LeaderboardPeriod = "standard" | "endless" | "negative" | "highscore" | "standard-hourly" | "endless-hourly";
 
 export interface ShareReportSubject {
   label: string;

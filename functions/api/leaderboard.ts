@@ -57,10 +57,14 @@ export async function onRequestGet(context: HandlerContext): Promise<Response> {
                )`
           : period === "negative"
             ? "where entry.score < 0"
+          : period === "highscore"
+            ? "where entry.score >= 0"
             : "";
     const orderBy =
       period === "negative"
         ? "order by entry.score asc, entry.created_at asc"
+        : period === "highscore"
+          ? "order by entry.score desc, entry.created_at asc"
         : period === "endless" || period === "endless-hourly"
         ? "order by entry.year desc, entry.score desc, entry.created_at asc"
         : period === "standard" || period === "standard-hourly"
@@ -116,6 +120,7 @@ function parsePeriod(value: string | null): ApiLeaderboardPeriod {
   if (
     value === "endless" ||
     value === "negative" ||
+    value === "highscore" ||
     value === "all" ||
     value === "standard-hourly" ||
     value === "endless-hourly"
